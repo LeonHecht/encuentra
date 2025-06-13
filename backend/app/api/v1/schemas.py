@@ -31,3 +31,17 @@ class SearchResponse(BaseModel):
     """
     query_log_id: int = Field(..., description="ID of the QueryLog entry")
     results: List[SearchResult] = Field(..., description="Retrieved documents")
+
+
+class ChatRequest(BaseModel):
+    question: str = Field(..., min_length=1, description="User question")
+    space: str = Field("supreme_court", description="Which corpus to use")
+    use_transformer: bool = False            # for later
+
+class Citation(BaseModel):
+    doc_id: str
+    snippet: str
+
+class ChatResponse(BaseModel):
+    answer: str
+    citations: List[Citation]

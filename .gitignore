@@ -43,7 +43,7 @@ pip-log.txt
 # SQLite DBs, migrations (if you want to regenerate)
 *.db
 backend/app/db/migrations/
-backend/app/data/user_uploads/*
+backend/app/api/data/user_uploads/*
 
 # Data directory (if you store large corpora or uploads here)
 data/static_corpus/files/
