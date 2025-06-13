@@ -2,8 +2,8 @@ import { Link } from "react-router-dom";
 
 export default function Landing() {
   return (
-    <div className="h-screen flex flex-col items-center justify-center bg-gradient-to-b from-slate-50 to-slate-100">
-      <h1 className="text-5xl font-extrabold mb-4">Encuentra</h1>
+    <div className="flex-1 h-screen flex flex-col items-center justify-center bg-gradient-to-b from-slate-50 to-slate-100">
+      <h1 className="text-5xl font-extrabold mb-4">encuentra</h1>
       <p className="text-lg text-slate-700 mb-6">
         Instant legal search & chat over your documents
       </p>

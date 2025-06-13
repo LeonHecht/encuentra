@@ -9,7 +9,7 @@ export default function App() {
   return (
     <div className="flex flex-col min-h-screen bg-slate-50">
       <Navbar />
-      <main className="flex-grow container mx-auto px-4 py-8">
+      <main className="flex flex-col flex-grow overflow-hidden min-h-0 mx-auto px-4">
         <Routes>
           <Route path="/"      element={<Landing />} />
           <Route path="/search"  element={<Search />} />
@@ -17,7 +17,7 @@ export default function App() {
           <Route path="/uploads" element={<Uploads />} />
         </Routes>
       </main>
-      <footer className="bg-white text-center py-4 text-sm text-gray-500 border-t">
+      <footer className="bg-white text-center py-2 text-sm text-gray-500 border-t">
         © 2025 encuentra
       </footer>
     </div>

@@ -31,7 +31,7 @@ export default function Chat() {
   };
 
   return (
-    <div className="h-screen flex flex-col p-6">
+    <div className="flex flex-col h-full min-h-0">
       {/* Context selector */}
       <div className="mb-4">
         <select
@@ -45,7 +45,7 @@ export default function Chat() {
       </div>
 
       {/* Chat window */}
-      <div className="flex-1 overflow-auto border rounded p-4 space-y-4">
+      <div className="flex-1 overflow-y-auto mb-4 min-h-0 space-y-4 pr-1">
         {messages.map((m, idx) => (
           <div
             key={idx}
@@ -65,7 +65,7 @@ export default function Chat() {
       </div>
 
       {/* Input */}
-      <form onSubmit={askBot} className="flex mt-4">
+      <form onSubmit={askBot} className="flex-shrink-0 flex space-x-2">
         <input
           type="text"
           className="flex-grow border p-2 rounded-l"
@@ -75,7 +75,7 @@ export default function Chat() {
         />
         <button
           type="submit"
-          className="bg-indigo-600 text-white px-4 rounded-r disabled:opacity-50"
+          className="bg-indigo-600 text-white px-4 rounded-r hover:bg-indigo-700"
           disabled={loading}
         >
           Enviar
