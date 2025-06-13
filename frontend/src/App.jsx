@@ -18,7 +18,7 @@ export default function App() {
         </Routes>
       </main>
       <footer className="bg-white text-center py-4 text-sm text-gray-500 border-t">
-        © 2025 Encuentra
+        © 2025 encuentra
       </footer>
     </div>
   );
