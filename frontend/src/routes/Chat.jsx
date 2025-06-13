@@ -31,7 +31,7 @@ export default function Chat() {
   };
 
   return (
-    <div className="flex flex-col h-full min-h-0">
+    <div className="flex flex-col flex-1 overflow-hidden min-h-0">
       {/* Context selector */}
       <div className="mb-4">
         <select
