@@ -9,6 +9,8 @@ from app.core.config import settings
 class UserData:
     username: str
     password: str
+    first_name: str = ""
+    last_name: str = ""
     spaces: List[str] = field(default_factory=list)
     organization: Optional[str] = None
 
@@ -21,6 +23,37 @@ class OrgData:
 users_db: Dict[str, UserData] = {}
 orgs_db: Dict[str, OrgData] = {}
 tokens_db: Dict[str, str] = {}
+
+
+def user_exists(username: str) -> bool:
+    """Return True if *username* is present in the in-memory DB."""
+    return username in users_db
+
+
+def register_user(username: str, password: str, first_name: str = "", last_name: str = "") -> UserData:
+    """Create a new user and return the created ``UserData``.
+
+    Raises ``ValueError`` if the user already exists.
+    """
+    if username in users_db:
+        raise ValueError("User already exists")
+
+    user = UserData(
+        username=username,
+        password=password,
+        first_name=first_name,
+        last_name=last_name,
+        spaces=["personal"],
+    )
+    users_db[username] = user
+    # create upload directory for the personal space
+    Path(settings.DATA_UPLOAD, username, "personal").mkdir(parents=True, exist_ok=True)
+    return user
+
+
+def get_user(username: str) -> Optional[UserData]:
+    """Return ``UserData`` for *username* or ``None``."""
+    return users_db.get(username)
 
 
 def init_data() -> None:

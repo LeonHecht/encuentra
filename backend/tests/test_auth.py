@@ -57,3 +57,25 @@ def test_create_user_space_invalid(auth_env):
         auth.create_user_space("alice", "bad/name")
     with pytest.raises(ValueError):
         auth.create_user_space("alice", "bad\\name")
+
+
+def test_user_exists_and_get_user(auth_env):
+    assert auth.user_exists("alice")
+    assert not auth.user_exists("bob")
+    user = auth.get_user("alice")
+    assert user and user.username == "alice"
+
+
+def test_register_user(auth_env):
+    new_user = auth.register_user("bob", "secret", "Bob", "Builder")
+    assert new_user.username == "bob"
+    assert new_user.first_name == "Bob"
+    assert auth.user_exists("bob")
+    # personal upload dir created
+    path = Path(settings.DATA_UPLOAD) / "bob" / "personal"
+    assert path.exists() and path.is_dir()
+
+
+def test_register_user_duplicate(auth_env):
+    with pytest.raises(ValueError):
+        auth.register_user("alice", "pass")

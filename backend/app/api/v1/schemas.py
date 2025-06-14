@@ -52,6 +52,21 @@ class LoginRequest(BaseModel):
 
 class LoginResponse(BaseModel):
     token: str
+    first_name: str | None = None
+    last_name: str | None = None
+
+
+class RegisterRequest(BaseModel):
+    username: str
+    password: str
+    first_name: str
+    last_name: str
+
+
+class UserInfo(BaseModel):
+    username: str
+    first_name: str
+    last_name: str
 
 class SpaceCreateRequest(BaseModel):
     name: str

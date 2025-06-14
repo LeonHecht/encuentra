@@ -4,6 +4,7 @@ import Landing from "./routes/Landing";
 import Search from "./routes/Search";
 import Chat from "./routes/Chat";
 import Uploads from "./routes/Uploads";
+import Login from "./routes/Login";
 
 export default function App() {
   return (
@@ -15,6 +16,7 @@ export default function App() {
           <Route path="/search"  element={<Search />} />
           <Route path="/chat"    element={<Chat />} />
           <Route path="/uploads" element={<Uploads />} />
+          <Route path="/login"   element={<Login />} />
         </Routes>
       </main>
       <footer className="bg-white text-center py-2 text-sm text-gray-500 border-t">
