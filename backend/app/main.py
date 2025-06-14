@@ -1,5 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from pathlib import Path
 from .core.config import settings
 from .api.v1.endpoints import search
 from app.services.bm25 import bm25_engine
@@ -32,3 +33,8 @@ def ping():
 @app.on_event("startup")
 def on_startup():
     bm25_engine.index(space="supreme_court")
+    uploads_root = Path(settings.DATA_UPLOAD)
+    if uploads_root.exists():
+        for dir in uploads_root.iterdir():
+            if dir.is_dir():
+                bm25_engine.index(space=dir.name)
