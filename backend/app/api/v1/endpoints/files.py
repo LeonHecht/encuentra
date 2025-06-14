@@ -1,10 +1,12 @@
-from fastapi import APIRouter, UploadFile, File, HTTPException, Form
+from fastapi import APIRouter, UploadFile, File, HTTPException, Form, Depends
 from pathlib import Path
 from typing import List
 import uuid
 
 from app.services.bm25 import bm25_engine
 from app.core.config import settings
+from app.dependencies import get_current_user
+from app.services.auth import get_accessible_spaces, UserData
 
 router = APIRouter()
 
@@ -15,12 +17,15 @@ UPLOADS_ROOT.mkdir(parents=True, exist_ok=True)
 @router.post("/upload", summary="Upload one or multiple documents into a space")
 async def upload_file(
     files: List[UploadFile] = File(...),
-    space: str = Form("default")
+    space: str = Form("default"),
+    user: UserData = Depends(get_current_user),
 ):
     """
     files: list of UploadFile
     space: the name of the space (folder) under UPLOADS_ROOT
     """
+    if space not in get_accessible_spaces(user.username):
+        raise HTTPException(403, detail="Space not accessible")
     space_dir = UPLOADS_ROOT / space
     space_dir.mkdir(parents=True, exist_ok=True)
 
