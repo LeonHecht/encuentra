@@ -69,7 +69,7 @@ export default function Search() {
   };
 
   return (
-    <div className="p-6">
+    <div className="w-full flex-1 overflow-y-auto min-h-0 space-y-4 px-16 py-8">
       <h2 className="text-2xl font-semibold mb-4">Buscar casos</h2>
 
       <div className="flex items-center mb-6 space-x-4">
