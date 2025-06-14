@@ -88,7 +88,9 @@ def authenticate(username: str, password: str) -> Optional[str]:
 def get_accessible_spaces(username: str) -> List[str]:
     user = users_db.get(username)
     if not user:
+        print(f"WARNING: User {username} not found")
         return PUBLIC_SPACES.copy()
+    print(f"DEGUB: User {username} found with spaces: {user.spaces}")
     spaces = [f"{user.username}/{s}" for s in user.spaces]
     if user.organization and user.organization in orgs_db:
         spaces += [f"{user.organization}/{s}" for s in orgs_db[user.organization].spaces]
