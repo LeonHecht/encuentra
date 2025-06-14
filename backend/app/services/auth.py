@@ -5,6 +5,8 @@ from pathlib import Path
 
 from app.core.config import settings
 
+# Spaces that are accessible to all users
+PUBLIC_SPACES = ["supreme_court"]
 @dataclass
 class UserData:
     username: str
@@ -86,11 +88,11 @@ def authenticate(username: str, password: str) -> Optional[str]:
 def get_accessible_spaces(username: str) -> List[str]:
     user = users_db.get(username)
     if not user:
-        return []
+        return PUBLIC_SPACES.copy()
     spaces = [f"{user.username}/{s}" for s in user.spaces]
     if user.organization and user.organization in orgs_db:
         spaces += [f"{user.organization}/{s}" for s in orgs_db[user.organization].spaces]
-    return spaces
+    return PUBLIC_SPACES + spaces
 
 
 def create_user_space(username: str, name: str) -> Path:

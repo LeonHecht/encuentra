@@ -1,9 +1,18 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { useApi } from "../hooks/useApi";
 
 export default function Chat() {
   const [question, setQuestion]   = useState("");
   const [messages, setMessages]   = useState([]); // {role,text,citations}
-  const [space, setSpace]         = useState("supreme_court");
+  const [spaces, setSpaces]       = useState([]);
+  const [space, setSpace]         = useState("");
+  useEffect(() => {
+    useApi("user/spaces").then((d) => {
+      const s = d.spaces || [];
+      setSpaces(s);
+      if (s.length > 0) setSpace(s[0]);
+    }).catch((e) => console.error("Failed to fetch spaces", e));
+  }, []);
   const [loading, setLoading]     = useState(false);
 
   const askBot = async (e) => {
@@ -14,12 +23,11 @@ export default function Chat() {
     setMessages((m) => [...m, userMsg]);
     setLoading(true);
 
-    const res = await fetch("http://localhost:8000/v1/chat", {
+    const data = await useApi("chat", "", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ question, space, }),
+      body: JSON.stringify({ question, space }),
     });
-    const data = await res.json();
     const botMsg = {
       role: "bot",
       text: data.answer,
@@ -39,8 +47,11 @@ export default function Chat() {
           onChange={(e) => setSpace(e.target.value)}
           className="border p-2 rounded"
         >
-          <option value="supreme_court">Supreme Court</option>
-          <option value="default">Impuestos Inmobiliarios</option>
+          {spaces.map((s) => (
+            <option key={s} value={s}>
+              {s}
+            </option>
+          ))}
         </select>
       </div>
 
