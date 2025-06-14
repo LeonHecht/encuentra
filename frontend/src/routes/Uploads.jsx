@@ -1,5 +1,6 @@
 // frontend/src/routes/Uploads.jsx
 import { useState } from "react";
+import { useApi } from "../hooks/useApi";
 
 export default function Uploads() {
   const [space, setSpace] = useState("default");
@@ -18,20 +19,17 @@ export default function Uploads() {
     fd.append("space", space);
 
     try {
-        const res = await fetch("http://localhost:8000/v1/upload", {
-          method: "POST",
-          body: fd,
-        });
-        if (!res.ok) {
-          const err = await res.text();
-          throw new Error(err || res.statusText);
-        }
-        const data = await res.json();
-        setMsg(`Subidos ${data.uploaded.length} archivos en espacio “${data.space}”.`);
-      } catch (err) {
-        console.error("Upload error:", err);
-        setMsg(`Error: ${err.message}`);
-      }
+      const data = await useApi("upload", "", {
+        method: "POST",
+        body: fd,
+      });
+      setMsg(
+        `Subidos ${data.uploaded.length} archivos en espacio “${data.space}”.`
+      );
+    } catch (err) {
+      console.error("Upload error:", err);
+      setMsg(`Error: ${err.message}`);
+    }
     };
 
   return (
