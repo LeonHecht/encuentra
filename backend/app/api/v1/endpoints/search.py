@@ -6,6 +6,11 @@ from app.services.bm25 import bm25_engine
 
 router = APIRouter()
 
+@router.get("/spaces")
+def list_spaces():
+    """Return available search spaces."""
+    return {"spaces": list(bm25_engine.bm25_models.keys())}
+
 @router.get("/search", response_model=SearchResponse)
 def search(
     q: str = Query(..., min_length=1),
@@ -13,12 +18,9 @@ def search(
     space: str = Query(..., min_length=1, description="Contexto: supreme_court|my_uploads|<other>")
 ):
     print(f"Received search query: '{q}' in space '{space}' with top_k={top_k}")
-    if space == "supreme_court":
-        hits = bm25_engine.search(q, top_k)
-    elif space == "default":    # uploads
-        hits = bm25_engine.search(q, top_k, space)
-    else:
+    if space not in bm25_engine.bm25_models:
         raise HTTPException(400, detail=f"Unknown space '{space}'")
+    hits = bm25_engine.search(q, top_k, space)
     results = [SearchResult(**hit) for hit in hits]
     # TODO: log query with space
     return SearchResponse(query_log_id=1, results=results)
