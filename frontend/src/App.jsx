@@ -7,9 +7,9 @@ import Uploads from "./routes/Uploads";
 
 export default function App() {
   return (
-    <div className="flex flex-col min-h-screen bg-slate-50">
+    <div className="flex flex-col h-screen overflow-hidden bg-slate-50">
       <Navbar />
-      <main className="flex flex-col flex-grow overflow-hidden min-h-0 mx-auto px-4">
+      <main className="flex flex-col flex-grow overflow-hidden min-h-0 mx-auto px-4 h-full w-full">
         <Routes>
           <Route path="/"      element={<Landing />} />
           <Route path="/search"  element={<Search />} />

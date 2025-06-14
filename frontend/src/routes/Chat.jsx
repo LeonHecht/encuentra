@@ -31,7 +31,7 @@ export default function Chat() {
   };
 
   return (
-    <div className="flex flex-col flex-1 overflow-hidden min-h-0">
+    <div className="flex flex-col h-full w-full min-h-0 mx-auto px-4 py-4 max-w-2xl">
       {/* Context selector */}
       <div className="mb-4">
         <select
@@ -45,7 +45,7 @@ export default function Chat() {
       </div>
 
       {/* Chat window */}
-      <div className="flex-1 overflow-y-auto min-h-0 space-y-4 pr-1 pb-4">
+      <div className="w-full flex-1 overflow-y-auto min-h-0 space-y-4 pr-1 pb-4">
         {messages.map((m, idx) => (
           <div
             key={idx}
