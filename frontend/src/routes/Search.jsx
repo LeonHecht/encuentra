@@ -1,17 +1,22 @@
 // frontend/src/routes/Search.jsx
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useApi } from "../hooks/useApi";
 
-const SPACE_OPTIONS = [
-  { value: "supreme_court", label: "Supreme Court" },
-  { value: "default",       label: "Impuestos Inmobiliarios" },
-];
 
 export default function Search() {
   const [q, setQ]           = useState("");
-  const [space, setSpace]   = useState(SPACE_OPTIONS[0].value);
+  const [spaces, setSpaces] = useState([]);
+  const [space, setSpace]   = useState("");
   const [results, setResults] = useState([]);
+  useEffect(() => {
+    useApi("user/spaces").then((d) => {
+      const s = d.spaces || [];
+      setSpaces(s);
+      if (s.length > 0) setSpace(s[0]);
+    }).catch((e) => console.error("Failed to fetch spaces", e));
+  }, []);
+
   const [loading, setLoading] = useState(false);
   const [feedbackById, setFeedbackById] = useState({});
   const [toast, setToast] = useState({ docId: null, msg: "" });
@@ -78,9 +83,9 @@ export default function Search() {
           value={space}
           onChange={(e) => setSpace(e.target.value)}
         >
-          {SPACE_OPTIONS.map((opt) => (
-            <option key={opt.value} value={opt.value}>
-              {opt.label}
+          {spaces.map((s) => (
+            <option key={s} value={s}>
+              {s}
             </option>
           ))}
         </select>
