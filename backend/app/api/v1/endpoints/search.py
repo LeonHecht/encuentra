@@ -1,28 +1,32 @@
-from fastapi import APIRouter, Query, HTTPException
+from fastapi import APIRouter, Query, HTTPException, Depends
 # from typing import List, Dict
 from ..schemas import SearchResponse, SearchResult
 from app.services.bm25 import bm25_engine
+from app.dependencies import get_current_user
+from app.services.auth import get_accessible_spaces, UserData
 
 
 router = APIRouter()
 
 @router.get("/spaces")
-def list_spaces():
-    """Return available search spaces."""
-    return {"spaces": list(bm25_engine.bm25_models.keys())}
+def list_spaces(user: UserData = Depends(get_current_user)):
+    """Return available search spaces for the current user."""
+    return {"spaces": get_accessible_spaces(user.username)}
 
 @router.get("/search", response_model=SearchResponse)
 def search(
     q: str = Query(..., min_length=1),
     top_k: int = Query(10, ge=1, le=50),
-    space: str = Query(..., min_length=1, description="Contexto: supreme_court|my_uploads|<other>")
+    space: str = Query(..., min_length=1, description="Contexto: supreme_court|my_uploads|<other>"),
+    user: UserData = Depends(get_current_user),
 ):
     print(f"Received search query: '{q}' in space '{space}' with top_k={top_k}")
+    if space not in get_accessible_spaces(user.username):
+        raise HTTPException(403, detail="Space not accessible")
     if space not in bm25_engine.bm25_models:
         raise HTTPException(400, detail=f"Unknown space '{space}'")
     hits = bm25_engine.search(q, top_k, space)
     results = [SearchResult(**hit) for hit in hits]
-    # TODO: log query with space
     return SearchResponse(query_log_id=1, results=results)
 
 # @router.post("/search", response_model=SearchResponse, summary="Run a BM25 or transformer search")

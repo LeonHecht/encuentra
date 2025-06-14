@@ -6,6 +6,8 @@ from .api.v1.endpoints import search
 from app.services.bm25 import bm25_engine
 from .api.v1.endpoints import files
 from app.api.v1.endpoints import chat
+from app.api.v1.endpoints import auth
+from app.services import auth as auth_service
 
 
 app = FastAPI(
@@ -24,6 +26,7 @@ app.add_middleware(
 app.include_router(search.router, prefix=f"/{settings.API_VERSION}")
 app.include_router(files.router, prefix=f"/{settings.API_VERSION}")
 app.include_router(chat.router, prefix=f"/{settings.API_VERSION}")
+app.include_router(auth.router, prefix=f"/{settings.API_VERSION}")
 
 @app.get("/ping")
 def ping():
@@ -32,9 +35,11 @@ def ping():
 # indexamos una sola vez al startup
 @app.on_event("startup")
 def on_startup():
+    auth_service.init_data()
     bm25_engine.index(space="supreme_court")
     uploads_root = Path(settings.DATA_UPLOAD)
     if uploads_root.exists():
-        for dir in uploads_root.iterdir():
-            if dir.is_dir():
-                bm25_engine.index(space=dir.name)
+        for path in uploads_root.glob("*/*"):
+            if path.is_dir():
+                rel = path.relative_to(uploads_root)
+                bm25_engine.index(space=str(rel))
