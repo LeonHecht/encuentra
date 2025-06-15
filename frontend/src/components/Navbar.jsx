@@ -1,5 +1,6 @@
 import { Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import logo from '../assets/logo_full-removebg.png'; // or .png
 
 export default function Navbar() {
   const { user } = useAuth();
@@ -7,10 +8,10 @@ export default function Navbar() {
   const initial = user?.first_name?.[0] || user?.email?.[0];
 
   return (
-    <nav className="bg-white shadow-md">
+    <nav className="shadow-md">
       <div className="container mx-auto px-4 py-3 flex items-center justify-between">
-        <Link to="/" className="text-2xl font-bold text-indigo-600">
-          encuentra
+        <Link to="/" className="flex items-center hover:opacity-80 transition scale-95">
+          <img src={logo} alt="Encuentra logo" className="w-32" />
         </Link>
         <div className="space-x-4 flex items-center">
           <Link to="/search" className="text-gray-600 hover:text-indigo-600">
