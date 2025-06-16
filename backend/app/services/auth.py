@@ -4,6 +4,7 @@ import uuid
 from pathlib import Path
 
 from app.core.config import settings
+from app.core.security import create_access_token
 
 # Spaces that are accessible to all users
 PUBLIC_SPACES = ["supreme_court"]
@@ -80,9 +81,7 @@ def authenticate(username: str, password: str) -> Optional[str]:
     user = users_db.get(username)
     if not user or user.password != password:
         return None
-    token = uuid.uuid4().hex
-    tokens_db[token] = username
-    return token
+    return create_access_token({"sub": username})
 
 
 def get_accessible_spaces(username: str) -> List[str]:
@@ -97,7 +96,7 @@ def get_accessible_spaces(username: str) -> List[str]:
     return PUBLIC_SPACES + spaces
 
 
-def create_user_space(username: str, name: str) -> Path:
+def create_user_space(username: str, name: str) -> str:
     """Create a directory for *name* under the given user's upload space.
     Reject ``name`` values containing path traversal characters and ensure the
     directory is created inside ``settings.DATA_UPLOAD/<username>/``.
@@ -118,7 +117,14 @@ def create_user_space(username: str, name: str) -> Path:
         raise ValueError("Invalid directory path")
 
     resolved_dir.mkdir(parents=True, exist_ok=True)
-    return resolved_dir
+
+    # put the new personal space into the user profile
+    user = users_db.get(username)
+    if user and name not in user.spaces:
+        user.spaces.append(name)
+    # Return plain string "alice/newspace" instead of Path,
+    # because that's what the rest of the API expects.
+    return f"{username}/{name}"
 
 init_data()
 

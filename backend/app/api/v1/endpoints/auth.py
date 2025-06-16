@@ -69,5 +69,5 @@ def create_space(req: SpaceCreateRequest, user: UserData = Depends(get_current_u
         space_key = create_user_space(user.username, req.name)
     except ValueError as e:
         raise HTTPException(400, detail=str(e))
-    bm25_engine.index(space_key)
+    bm25_engine.index(str(space_key))
     return {"space": space_key}

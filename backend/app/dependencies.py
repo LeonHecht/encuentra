@@ -1,13 +1,17 @@
 from fastapi import Header, HTTPException
-from app.services.auth import tokens_db, users_db, UserData
+from fastapi.security import HTTPBearer
 
+from app.services.auth import users_db, UserData
+from app.core.security import verify_access_token
 
 def get_current_user(authorization: str = Header(None)) -> UserData:
-    if not authorization or not authorization.startswith("Bearer "):
+    if not authorization or not authorization.lower().startswith("bearer "):
         raise HTTPException(401, detail="Invalid or missing Authorization header")
-    token = authorization[7:]
-    username = tokens_db.get(token)
-    if not username:
+    token = authorization.split()[1]          # strip “Bearer ”
+    try:
+        payload = verify_access_token(token)
+        username = payload.get("sub")
+    except ValueError:
         raise HTTPException(401, detail="Invalid token")
     user = users_db.get(username)
     if not user:

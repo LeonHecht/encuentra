@@ -83,3 +83,5 @@ npm-packages-offline-cache/
 *.ntvs*
 *.njsproj
 *.sln
+
+project_sources.txt

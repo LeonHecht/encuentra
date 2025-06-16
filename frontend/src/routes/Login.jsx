@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { useAuth } from "../context/AuthContext";
+import { useAuth } from "@/context/AuthContext";
 
 export default function Login() {
   const navigate = useNavigate();
@@ -30,6 +30,8 @@ export default function Login() {
     });
     if (res.ok) {
       const data = await res.json();
+      // persist the raw token for useApi to pick up:
+      localStorage.setItem("auth", JSON.stringify({ token: data.token }));
       setUser({
         token: data.token,
         email,
@@ -59,6 +61,8 @@ export default function Login() {
     });
     if (res.ok) {
       const data = await res.json();
+      // persist the raw token for useApi to pick up:
+      localStorage.setItem("auth", JSON.stringify({ token: data.token }));
       setUser({
         token: data.token,
         email,

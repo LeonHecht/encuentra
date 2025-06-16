@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
-import { useApi } from "../hooks/useApi";
+import { useApi } from "@/hooks/useApi";
+import SpaceSelect  from "@/components/SpaceSelect";
 
 export default function Chat() {
   const [question, setQuestion]   = useState("");
@@ -42,17 +43,11 @@ export default function Chat() {
     <div className="flex flex-col h-full w-full min-h-0 mx-auto px-4 py-4 max-w-2xl">
       {/* Context selector */}
       <div className="mb-4">
-        <select
-          value={space}
-          onChange={(e) => setSpace(e.target.value)}
-          className="border p-2 rounded"
-        >
-          {spaces.map((s) => (
-            <option key={s} value={s}>
-              {s}
-            </option>
-          ))}
-        </select>
+        <SpaceSelect
+         value={space}
+         onChange={(v) => setSpace(v)}
+         className="border p-2 rounded"
+       />
       </div>
 
       {/* Chat window */}

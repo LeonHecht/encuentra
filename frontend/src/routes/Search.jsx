@@ -1,7 +1,6 @@
-// frontend/src/routes/Search.jsx
-
 import { useState, useEffect } from "react";
-import { useApi } from "../hooks/useApi";
+import { useApi } from "@/hooks/useApi";
+import SpaceSelect  from "@/components/SpaceSelect";
 
 
 export default function Search() {
@@ -21,7 +20,7 @@ export default function Search() {
   const [feedbackById, setFeedbackById] = useState({});
   const [toast, setToast] = useState({ docId: null, msg: "" });
 
-  // Highlight helper (same as in your other app)
+  // Highlight helper
   const renderSnippet = (snippet) => {
     const terms = Array.from(
       new Set(
@@ -78,18 +77,11 @@ export default function Search() {
       <h2 className="text-2xl font-semibold mb-4">Buscar casos</h2>
 
       <div className="flex items-center mb-6 space-x-4">
-        <select
-          className="border p-2 rounded"
+        <SpaceSelect
           value={space}
-          onChange={(e) => setSpace(e.target.value)}
-        >
-          {spaces.map((s) => (
-            <option key={s} value={s}>
-              {s}
-            </option>
-          ))}
-        </select>
-
+          onChange={(v) => setSpace(v)}
+          className="border p-2 rounded"
+        />
         <input
           type="text"
           className="flex-grow border p-2 rounded-l"
