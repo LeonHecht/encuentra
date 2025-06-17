@@ -29,7 +29,7 @@ export default function App() {
           <Route path="/login"   element={<Login />} />
         </Routes>
       </main>
-      <footer className="text-center py-2 text-sm text-gray-500 border-t">
+      <footer className="text-center py-1 text-xs text-gray-500 border-t">
         © 2025 encuentra
       </footer>
     </div>

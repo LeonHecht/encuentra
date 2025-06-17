@@ -23,7 +23,7 @@ export default function Landing() {
         className="flex flex-col items-center mt-6 space-y-10"
       >
         <p className="text-xl md:text-2xl font-light text-center">
-          Instant legal search & chat over your documents
+          Intelligent legal search & chat over your documents
         </p>
 
         <div className="flex gap-4">

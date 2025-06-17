@@ -60,28 +60,33 @@ export default function Uploads() {
       <div className="space-y-2">
         <label className="block">Select space:</label>
         <SpaceSelect
+          allowCreate
           key={spacesVersion}          // reload list after creation
           value={space}
           onChange={(v) => {
             if (v === "__new__") setCreating(true);
             else { setCreating(false); setSpace(v); }
           }}
-          className="border p-2 rounded w-full"
+          className="border py-3 px-4 rounded rounded-2xl hover:bg-gray-50 focus:outline-none w-full"
         />
 
         {creating && (
           <div className="flex gap-2 mt-2">
-            <input
-              type="text"
-              placeholder="new-space-name"
-              value={newName}
-              onChange={(e) => setNewName(e.target.value)}
-              className="flex-1 border p-2 rounded"
-            />
+            <div className={`input-wrapper flex-grow relative ${newName ? 'caret-hidden' : ''}`}>
+              <input
+                type="text"
+                placeholder="new-space-name"
+                value={newName}
+                onChange={(e) => setNewName(e.target.value)}
+                className="flex-grow w-full py-3 px-4 border rounded-2xl
+                                focus:outline-none focus:placeholder-transparent
+                                hover:bg-gray-50 transition-colors"
+              />
+            </div>
             <button
               type="button"
               onClick={handleCreate}
-              className="bg-indigo-600 text-white px-3 rounded"
+              className="px-8 py-3 bg-gray-200 text-gray-900 rounded-3xl hover:bg-gray-300 transition"
             >
               Create
             </button>
@@ -110,7 +115,7 @@ export default function Uploads() {
       <button
         type="submit"
         disabled={!space || space === "__new__" || files.length === 0}
-        className="bg-indigo-600 text-white px-4 py-2 rounded disabled:opacity-50"
+        className="px-8 py-3 bg-black text-white rounded-3xl hover:bg-gray-800 transition disabled:opacity-50"
       >
         Upload {files.length > 0 && `(${files.length})`}
       </button>

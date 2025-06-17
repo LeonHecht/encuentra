@@ -1,6 +1,6 @@
 import { useSpaces } from "@/hooks/useSpaces";
 
-export default function SpaceSelect({ value, onChange, ...rest }) {
+export default function SpaceSelect({ value, onChange, allowCreate = false, ...rest }) {
   const { spaces, loading, label, user } = useSpaces();
 
   if (loading) return <div>Loading spaces…</div>;
@@ -44,8 +44,11 @@ export default function SpaceSelect({ value, onChange, ...rest }) {
           ))}
         </optgroup>
       )}
-      {/* always add a "new" option at the very bottom */}
-      <option key="__new__" value="__new__">➕ New space…</option>
+      {allowCreate && (
+        <option key="__new__" value="__new__">
+          ➕ New space…
+        </option>
+      )}
     </select>
   );
 }
