@@ -47,7 +47,7 @@ export default function Chat() {
         <SpaceSelect
          value={space}
          onChange={(v) => setSpace(v)}
-         className="border py-3 px-4 rounded rounded-2xl hover:bg-gray-50 focus:outline-none"
+         className="p-3 bg-transparent transition border border-transparent rounded-2xl hover:border-inherit hover:bg-gray-50 hover:cursor-pointer focus:outline-none"
        />
       </div>
 
@@ -56,8 +56,8 @@ export default function Chat() {
         {messages.map((m, idx) => (
           <div
             key={idx}
-            className={`p-3 rounded ${
-              m.role === "user" ? "bg-slate-100 self-end" : "bg-white"
+            className={`p-4 rounded-3xl ${
+              m.role === "user" ? "bg-gray-100 self-end" : "bg-white hover:bg-gray-50 border transition"
             }`}
           >
           <p>
@@ -90,7 +90,7 @@ export default function Chat() {
         </div>
         <button
           type="submit"
-          className="px-8 py-3 bg-gray-200 text-gray-900 rounded-3xl hover:bg-gray-300 transition"
+          className="px-8 py-3 bg-gray-200 text-gray-900 border rounded-3xl hover:bg-gray-300 transition"
           disabled={loading}
         >
           Enviar

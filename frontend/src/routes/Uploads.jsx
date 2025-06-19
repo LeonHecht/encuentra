@@ -53,74 +53,76 @@ export default function Uploads() {
 
   /* ---------- JSX ---------- */
   return (
-    <form onSubmit={onSubmit} className="p-6 space-y-4 max-w-lg">
-      <h2 className="text-2xl font-semibold">Upload documents</h2>
+    <div className="flex items-center justify-center h-screen">
+      <form onSubmit={onSubmit} className="p-6 space-y-6 max-w-lg w-full rounded-3xl shadow-lg">
+        <h2 className="text-2xl font-semibold">Upload documents</h2>
 
-      {/* -------- space picker + new-space flow -------- */}
-      <div className="space-y-2">
-        <label className="block">Select space:</label>
-        <SpaceSelect
-          allowCreate
-          key={spacesVersion}          // reload list after creation
-          value={space}
-          onChange={(v) => {
-            if (v === "__new__") setCreating(true);
-            else { setCreating(false); setSpace(v); }
-          }}
-          className="border py-3 px-4 rounded rounded-2xl hover:bg-gray-50 focus:outline-none w-full"
-        />
+        {/* -------- space picker + new-space flow -------- */}
+        <div className="space-y-2">
+          <label className="block">Select space:</label>
+          <SpaceSelect
+            allowCreate
+            key={spacesVersion}          // reload list after creation
+            value={space}
+            onChange={(v) => {
+              if (v === "__new__") setCreating(true);
+              else { setCreating(false); setSpace(v); }
+            }}
+            className="p-3 bg-transparent transition border border-transparent rounded-2xl hover:border-inherit hover:bg-gray-50 hover:cursor-pointer focus:outline-none"
+          />
 
-        {creating && (
-          <div className="flex gap-2 mt-2">
-            <div className={`input-wrapper flex-grow relative ${newName ? 'caret-hidden' : ''}`}>
-              <input
-                type="text"
-                placeholder="new-space-name"
-                value={newName}
-                onChange={(e) => setNewName(e.target.value)}
-                className="flex-grow w-full py-3 px-4 border rounded-2xl
-                                focus:outline-none focus:placeholder-transparent
-                                hover:bg-gray-50 transition-colors"
-              />
+          {creating && (
+            <div className="flex gap-2 mt-2">
+              <div className={`input-wrapper flex-grow relative ${newName ? 'caret-hidden' : ''}`}>
+                <input
+                  type="text"
+                  placeholder="new-space-name"
+                  value={newName}
+                  onChange={(e) => setNewName(e.target.value)}
+                  className="flex-grow w-full py-3 px-4 border rounded-2xl
+                                  focus:outline-none focus:placeholder-transparent
+                                  hover:bg-gray-50 transition-colors"
+                />
+              </div>
+              <button
+                type="button"
+                onClick={handleCreate}
+                className="px-8 py-3 bg-gray-200 text-gray-900 rounded-3xl hover:bg-gray-300 transition"
+              >
+                Create
+              </button>
+              <button
+                type="button"
+                onClick={() => { setCreating(false); setNewName(""); }}
+                className="text-gray-600 px-2"
+              >
+                Cancel
+              </button>
             </div>
-            <button
-              type="button"
-              onClick={handleCreate}
-              className="px-8 py-3 bg-gray-200 text-gray-900 rounded-3xl hover:bg-gray-300 transition"
-            >
-              Create
-            </button>
-            <button
-              type="button"
-              onClick={() => { setCreating(false); setNewName(""); }}
-              className="text-gray-600 px-2"
-            >
-              Cancel
-            </button>
-          </div>
-        )}
-      </div>
+          )}
+        </div>
 
-      {/* -------- file picker -------- */}
-      <div>
-        <label className="block mb-1">Choose files:</label>
-        <input
-          type="file"
-          multiple
-          onChange={(e) => setFiles(Array.from(e.target.files))}
-          className="block"
-        />
-      </div>
+        {/* -------- file picker -------- */}
+        <div>
+          <label className="block mb-1">Choose files:</label>
+          <input
+            type="file"
+            multiple
+            onChange={(e) => setFiles(Array.from(e.target.files))}
+            className="block"
+          />
+        </div>
 
-      <button
-        type="submit"
-        disabled={!space || space === "__new__" || files.length === 0}
-        className="px-8 py-3 bg-black text-white rounded-3xl hover:bg-gray-800 transition disabled:opacity-50"
-      >
-        Upload {files.length > 0 && `(${files.length})`}
-      </button>
+        <button
+          type="submit"
+          disabled={!space || space === "__new__" || files.length === 0}
+          className="px-8 py-3 bg-black text-white rounded-3xl hover:bg-gray-800 transition disabled:opacity-50"
+        >
+          Upload {files.length > 0 && `(${files.length})`}
+        </button>
 
-      {msg && <p className="text-green-600">{msg}</p>}
-    </form>
+        {msg && <p className="text-green-600">{msg}</p>}
+      </form>
+    </div>
   );
 }

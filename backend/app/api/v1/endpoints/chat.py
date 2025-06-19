@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Body
 from ..schemas import ChatRequest, ChatResponse, Citation
 from app.services.bm25 import bm25_engine      # later: transformer_engine, LLM
+from time import sleep  # Simulate processing time
 
 router = APIRouter()
 
@@ -75,7 +76,15 @@ SERÁ JUSTICIA.
 [Firma y sello]
 
 Adjunto: Instrumental detallada supra.""")
+    elif req.question == "Cuántos casos resolvió Alfredo en 2025":
+        citation_objs = [
+            Citation(doc_id="casos_por_abogado.xlsx", snippet="Alfredo resolvió 27 casos en 2025.")
+        ]
+        dummy_answer = "Alfredo resolvió 27 casos en 2025. Ten en cuenta que el año no ha terminado y puede haber más casos pendientes."
     else:
         dummy_answer = "Lo siento, no encontré información sobre eso en la base de conocimiento."
+        citation_objs = []
+
+    sleep(1)  # Simulate processing time
 
     return ChatResponse(answer=dummy_answer, citations=citation_objs)

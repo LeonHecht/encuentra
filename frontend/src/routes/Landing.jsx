@@ -11,8 +11,8 @@ export default function Landing() {
         transition={{ type: 'spring', stiffness: 80, damping: 16, duration: 1.1 }}
         className="flex items-end"
       >
-        <h1 className="text-6xl md:text-6xl font-semibold tracking-tight">encuentr.a</h1>
-        <h1 className="text-6xl md:text-6xl font-semibold tracking-tight text-gray-400">i</h1>
+        <h1 className="text-6xl md:text-6xl font-semibold tracking-tight">encuentra</h1>
+        {/* <h1 className="text-6xl md:text-6xl font-semibold tracking-tight text-gray-400">i</h1> */}
       </motion.div>
 
       {/* Subtitle + buttons fade / slide in once headline settles */}
