@@ -1,5 +1,6 @@
 import { Link } from 'react-router-dom';
 import { motion } from 'framer-motion';
+import logo from '../assets/logo_full-removebg.png';
 
 export default function Landing() {
   return (
@@ -12,7 +13,7 @@ export default function Landing() {
         className="flex items-end"
       >
         <h1 className="text-6xl md:text-6xl font-semibold tracking-tight">encuentra</h1>
-        {/* <h1 className="text-6xl md:text-6xl font-semibold tracking-tight text-gray-400">i</h1> */}
+        {/* <img src={logo} alt="Encuentra logo" className="w-64" /> */}
       </motion.div>
 
       {/* Subtitle + buttons fade / slide in once headline settles */}
@@ -23,7 +24,7 @@ export default function Landing() {
         className="flex flex-col items-center mt-6 space-y-10"
       >
         <p className="text-xl md:text-2xl font-light text-center">
-          Intelligent legal search & chat over your documents
+          Búsqueda legal inteligente & chatea con tus documentos
         </p>
 
         <div className="flex gap-4">
@@ -31,7 +32,7 @@ export default function Landing() {
             to="/search"
             className="px-8 py-3 bg-black text-white rounded-3xl hover:bg-gray-800 transition"
           >
-            Search
+            Buscar
           </Link>
           <Link
             to="/chat"

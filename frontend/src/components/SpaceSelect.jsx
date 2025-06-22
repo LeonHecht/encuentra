@@ -3,8 +3,8 @@ import { useSpaces } from "@/hooks/useSpaces";
 export default function SpaceSelect({ value, onChange, allowCreate = false, ...rest }) {
   const { spaces, loading, label, user } = useSpaces();
 
-  if (loading) return <div>Loading spaces…</div>;
-  if (!spaces.length) return <div>No spaces available</div>;
+  if (loading) return <div>Cargando espacios…</div>;
+  if (!spaces.length) return <div>Sin espacios disponibles</div>;
 
   // ----- split into groups -----
   const groups = {

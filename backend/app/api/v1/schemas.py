@@ -44,7 +44,8 @@ class Citation(BaseModel):
 
 class ChatResponse(BaseModel):
     answer: str
-    citations: List[Citation]
+    citations: list[Citation] = []
+    file_url: str | None = None
 
 class LoginRequest(BaseModel):
     username: str

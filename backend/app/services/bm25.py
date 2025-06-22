@@ -27,7 +27,7 @@ class BM25Search:
     # helper to normalize tokens: strip accents, lowercase, and drop non‐letters
     def normalize_token(self, tok: str) -> str:
         tok = self.strip_accents(tok.lower())
-        return re.sub(r'[^a-zA-Z]', '', tok)
+        return tok
 
     def index(self, space="supreme_court"):
         """Load documents from CORPUS_PATH into BM25 index."""

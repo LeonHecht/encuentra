@@ -59,7 +59,7 @@ export default function Uploads() {
 
         {/* -------- space picker + new-space flow -------- */}
         <div className="space-y-2">
-          <label className="block">Select space:</label>
+          <label className="block">Elige espacio:</label>
           <SpaceSelect
             allowCreate
             key={spacesVersion}          // reload list after creation
@@ -103,8 +103,8 @@ export default function Uploads() {
         </div>
 
         {/* -------- file picker -------- */}
-        <div>
-          <label className="block mb-1">Choose files:</label>
+        <div className="space-y-2">
+          <label className="block mb-1">Elige archivos:</label>
           <input
             type="file"
             multiple
