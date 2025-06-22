@@ -2,6 +2,7 @@ import { useState } from "react";
 import SpaceSelect      from "@/components/SpaceSelect";
 import { useApi }       from "@/hooks/useApi";
 import { createSpace }  from "@/api/createSpace";
+import IntegrationTabs  from "@/components/IntegrationTabs";
 
 export default function Uploads() {
   const [spacesVersion, bump] = useState(0);      // force SpaceSelect reload
@@ -51,78 +52,137 @@ export default function Uploads() {
     }
   };
 
-  /* ---------- JSX ---------- */
   return (
     <div className="flex items-center justify-center h-screen">
-      <form onSubmit={onSubmit} className="p-6 space-y-6 max-w-lg w-full rounded-3xl shadow-lg">
-        <h2 className="text-2xl font-semibold">Upload documents</h2>
+      <div className="bg-white shadow-xl rounded-3xl p-8 w-full max-w-xl space-y-6">
+        <IntegrationTabs>
+          {(view) => (
+            <>
+              {view({
+                /* ---------- LOCAL FILE UPLOAD ---------- */
+                local: (
+                  <>
+                    <h2 className="text-2xl font-semibold mb-6">
+                      Upload documents
+                    </h2>
 
-        {/* -------- space picker + new-space flow -------- */}
-        <div className="space-y-2">
-          <label className="block">Elige espacio:</label>
-          <SpaceSelect
-            allowCreate
-            key={spacesVersion}          // reload list after creation
-            value={space}
-            onChange={(v) => {
-              if (v === "__new__") setCreating(true);
-              else { setCreating(false); setSpace(v); }
-            }}
-            className="p-3 bg-transparent transition border border-transparent rounded-2xl hover:border-inherit hover:bg-gray-50 hover:cursor-pointer focus:outline-none"
-          />
+                    <form onSubmit={onSubmit} className="space-y-6">
+                      {/* -------- space picker + new-space flow -------- */}
+                      <div className="space-y-2">
+                        <label className="block">Elige espacio:</label>
+                        <SpaceSelect
+                          allowCreate
+                          key={spacesVersion}          // reload list after creation
+                          value={space}
+                          onChange={(v) => {
+                            if (v === "__new__") setCreating(true);
+                            else { setCreating(false); setSpace(v); }
+                          }}
+                          className="p-3 bg-transparent transition border border-transparent rounded-2xl hover:border-inherit hover:bg-gray-50 hover:cursor-pointer focus:outline-none"
+                        />
 
-          {creating && (
-            <div className="flex gap-2 mt-2">
-              <div className={`input-wrapper flex-grow relative ${newName ? 'caret-hidden' : ''}`}>
-                <input
-                  type="text"
-                  placeholder="new-space-name"
-                  value={newName}
-                  onChange={(e) => setNewName(e.target.value)}
-                  className="flex-grow w-full py-3 px-4 border rounded-2xl
-                                  focus:outline-none focus:placeholder-transparent
-                                  hover:bg-gray-50 transition-colors"
-                />
-              </div>
-              <button
-                type="button"
-                onClick={handleCreate}
-                className="px-8 py-3 bg-gray-200 text-gray-900 rounded-3xl hover:bg-gray-300 transition"
-              >
-                Create
-              </button>
-              <button
-                type="button"
-                onClick={() => { setCreating(false); setNewName(""); }}
-                className="text-gray-600 px-2"
-              >
-                Cancel
-              </button>
-            </div>
+                        {creating && (
+                          <div className="flex gap-2 mt-2">
+                            <div className={`input-wrapper flex-grow relative ${newName ? 'caret-hidden' : ''}`}>
+                              <input
+                                type="text"
+                                placeholder="new-space-name"
+                                value={newName}
+                                onChange={(e) => setNewName(e.target.value)}
+                                className="flex-grow w-full py-3 px-4 border rounded-2xl
+                                            focus:outline-none focus:placeholder-transparent
+                                            hover:bg-gray-50 transition-colors"
+                              />
+                            </div>
+                            <button
+                              type="button"
+                              onClick={handleCreate}
+                              className="px-8 py-3 bg-gray-200 text-gray-900 rounded-3xl hover:bg-gray-300 transition"
+                            >
+                              Create
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => { setCreating(false); setNewName(""); }}
+                              className="text-gray-600 px-2"
+                            >
+                              Cancel
+                            </button>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* -------- file picker -------- */}
+                      <div className="space-y-2">
+                        <label className="block mb-1">Elige archivos:</label>
+                        <input
+                          type="file"
+                          multiple
+                          onChange={(e) => setFiles(Array.from(e.target.files))}
+                          className="block"
+                        />
+                      </div>
+
+                      <button
+                        type="submit"
+                        disabled={!space || space === "__new__" || files.length === 0}
+                        className="px-8 py-3 bg-black text-white rounded-3xl hover:bg-gray-800 transition disabled:opacity-50"
+                      >
+                        Subir {files.length > 0 && `(${files.length})`}
+                      </button>
+
+                      {msg && <p className="text-green-600">{msg}</p>}
+                    </form>
+                  </>
+                ),
+
+                /* ---------- PLACEHOLDERS ---------- */
+                gdrive: (
+                  <div className="text-center py-10 text-gray-500">
+                    <h2 className="text-2xl font-semibold mb-4">
+                      Google Drive
+                    </h2>
+                    <p className="mb-4 text-lg font-medium">
+                      Google Drive integration
+                    </p>
+                    <p>
+                      Coming soon…
+                    </p>
+                  </div>
+                ),
+
+                sharepoint: (
+                  <div className="text-center py-10 text-gray-500">
+                    <h2 className="text-2xl font-semibold mb-4">
+                      SharePoint
+                    </h2>
+                    <p className="mb-4 text-lg font-medium">
+                      SharePoint integration
+                    </p>
+                    <p>
+                      Coming soon…
+                    </p>
+                  </div>
+                ),
+
+                onedrive: (
+                  <div className="text-center py-10 text-gray-500">
+                    <h2 className="text-2xl font-semibold mb-4">
+                      OneDrive
+                    </h2>
+                    <p className="mb-4 text-lg font-medium">
+                      OneDrive integration
+                    </p>
+                    <p>
+                      Coming soon…
+                    </p>
+                  </div>
+                )
+              })}
+            </>
           )}
-        </div>
-
-        {/* -------- file picker -------- */}
-        <div className="space-y-2">
-          <label className="block mb-1">Elige archivos:</label>
-          <input
-            type="file"
-            multiple
-            onChange={(e) => setFiles(Array.from(e.target.files))}
-            className="block"
-          />
-        </div>
-
-        <button
-          type="submit"
-          disabled={!space || space === "__new__" || files.length === 0}
-          className="px-8 py-3 bg-black text-white rounded-3xl hover:bg-gray-800 transition disabled:opacity-50"
-        >
-          Upload {files.length > 0 && `(${files.length})`}
-        </button>
-
-        {msg && <p className="text-green-600">{msg}</p>}
-      </form>
+        </IntegrationTabs>
+      </div>
     </div>
   );
 }
