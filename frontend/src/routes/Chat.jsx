@@ -1,9 +1,12 @@
 import { useState, useEffect } from "react";
 import { useApi } from "@/hooks/useApi";
 import SpaceSelect from "@/components/SpaceSelect";
-import TypewriterText from "@/components/TypewriterText";
+import ChatMessage from "@/components/ChatMessage";
+import MarkdownText       from "@/components/MarkdownText";
+import useTypewriterMarkdown from "@/hooks/useTypewriterMarkdown";
 
 export default function Chat() {
+  const API_BASE = import.meta.env.VITE_API_BASE || "http://localhost:8000";
   const [question, setQuestion]   = useState("");
   const [messages, setMessages]   = useState([]); // {role,text,citations}
   const [spaces, setSpaces]       = useState([]);
@@ -34,6 +37,7 @@ export default function Chat() {
       role: "bot",
       text: data.answer,
       citations: data.citations,
+      file_url: data.file_url || null, // Optional file URL
     };
     setMessages((m) => [...m, botMsg]);
     setQuestion("");
@@ -54,23 +58,7 @@ export default function Chat() {
       {/* Chat window */}
       <div className="w-full flex-1 overflow-y-auto min-h-0 space-y-4 pr-1 pb-4">
         {messages.map((m, idx) => (
-          <div
-            key={idx}
-            className={`p-4 rounded-3xl ${
-              m.role === "user" ? "bg-gray-100 self-end" : "bg-white hover:bg-gray-50 border transition"
-            }`}
-          >
-          <p>
-            {m.role === "bot"
-              ? <TypewriterText text={m.text} />
-              : m.text}                           
-          </p>
-            {m.citations && m.citations.length > 0 && (
-              <div className="mt-2 text-xs text-slate-500">
-                Fuente: {m.citations[0].doc_id}
-              </div>
-            )}
-          </div>
+          <ChatMessage key={idx} msg={m} baseUrl={API_BASE} />
         ))}
         {loading && <p className="text-slate-500">⌛ Generando…</p>}
       </div>

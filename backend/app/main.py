@@ -1,5 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from pathlib import Path
 from .core.config import settings
 from .api.v1.endpoints import search
@@ -27,6 +28,7 @@ app.include_router(search.router, prefix=f"/{settings.API_VERSION}")
 app.include_router(files.router, prefix=f"/{settings.API_VERSION}")
 app.include_router(chat.router, prefix=f"/{settings.API_VERSION}")
 app.include_router(auth.router, prefix=f"/{settings.API_VERSION}")
+app.mount("/downloads", StaticFiles(directory="backend/app/static/downloads"), name="downloads")
 
 @app.get("/ping")
 def ping():
