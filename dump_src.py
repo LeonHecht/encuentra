@@ -2,6 +2,9 @@ from pathlib import Path
 import mimetypes
 import sys
 
+TEXT_EXTS = {".py", ".js", ".jsx", ".ts", ".tsx",
+             ".json", ".md", ".css", ".html", ".txt", ".yml", ".yaml"}
+
 def dump_project_sources(
     root: Path | str = ".",
     out_file: Path | str = "project_sources.txt",
@@ -36,9 +39,11 @@ def dump_project_sources(
             if any(part in skip_dirs for part in path.relative_to(root).parts):
                 continue
             if path.is_file():
-                # Very light heuristic: skip files that look binary
+                ext_ok = path.suffix.lower() in TEXT_EXTS
                 mtype, _ = mimetypes.guess_type(path.name)
-                if mtype is None or not mtype.startswith(text_mimetypes):
+                # Very light heuristic: skip files that look binary
+                if not ext_ok and (mtype is None or not mtype.startswith(text_mimetypes)):
+                    print(f"Skipped (binary?): {path.relative_to(root)}", file=sys.stderr)
                     continue
 
                 rel = path.relative_to(root)
@@ -58,5 +63,5 @@ def dump_project_sources(
 
 # --------------------------------------------------------------------
 if __name__ == "__main__":
-    dump_project_sources()
+    dump_project_sources(root="landing", out_file="landing_src.txt")
 # --------------------------------------------------------------------

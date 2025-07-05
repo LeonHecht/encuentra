@@ -85,3 +85,10 @@ npm-packages-offline-cache/
 *.sln
 
 project_sources.txt
+
+landing/node_modules/
+landing/dist/
+landing/build/
+landing/.env
+landing/.env.local
+landing/.env.*.local
