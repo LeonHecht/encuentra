@@ -59,14 +59,13 @@ Proveer de conformidad,
 *Adjunto: Instrumental detallada supra.*
 """)
         
-    elif req.question == "Cuántos casos resolvió Alfredo en 2025":
+    elif req.question == "Cuántos casos resolvió el abogado Alfredo en 2025":
         citation_objs = [
             Citation(doc_id="casos_por_abogado.xlsx", snippet="Alfredo resolvió 27 casos en 2025.")
         ]
         dummy_answer = "Alfredo resolvió 27 casos en 2025. Ten en cuenta que el año no ha terminado y puede haber más casos pendientes."
 
-    elif req.question.lower().strip().startswith(
-        "cuántos casos de hurto hubo por año desde 2011"):
+    elif req.question.startswith("Cuántos casos de hurto hubo por año desde 2011"):
         file_name = "image.png"
         file_url  = f"/downloads/{file_name}"
 
