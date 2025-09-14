@@ -28,11 +28,11 @@ app.include_router(search.router, prefix=f"/{settings.API_VERSION}")
 app.include_router(files.router, prefix=f"/{settings.API_VERSION}")
 app.include_router(chat.router, prefix=f"/{settings.API_VERSION}")
 app.include_router(auth.router, prefix=f"/{settings.API_VERSION}")
-app.mount("/downloads", StaticFiles(directory="backend/app/static/downloads"), name="downloads")
+app.mount("/downloads", StaticFiles(directory="app/static/downloads"), name="downloads")
 
 @app.get("/ping")
 def ping():
-    return {"satus": "pong"}
+    return {"status": "pong"}
 
 # indexamos una sola vez al startup
 @app.on_event("startup")

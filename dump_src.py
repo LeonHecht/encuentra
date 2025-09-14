@@ -63,5 +63,5 @@ def dump_project_sources(
 
 # --------------------------------------------------------------------
 if __name__ == "__main__":
-    dump_project_sources(root="landing", out_file="landing_src.txt")
+    dump_project_sources(root="backend", out_file="backend_src.txt")
 # --------------------------------------------------------------------
