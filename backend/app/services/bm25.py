@@ -4,7 +4,7 @@
 import json
 from pathlib import Path
 from rank_bm25 import BM25Okapi
-from app.core.config import settings
+from ..core.config import settings
 import unicodedata
 import re
 
@@ -27,6 +27,8 @@ class BM25Search:
     # helper to normalize tokens: strip accents, lowercase, and drop non‐letters
     def normalize_token(self, tok: str) -> str:
         tok = self.strip_accents(tok.lower())
+        # drop any non-alphanumeric characters to match test queries
+        tok = re.sub(r"[^a-z0-9]+", "", tok)
         return tok
 
     def index(self, space="supreme_court"):

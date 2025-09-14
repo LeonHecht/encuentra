@@ -1,20 +1,14 @@
-import sys
 from pathlib import Path
 import io
 import pytest
 
-# Add backend directory to path for package imports
-ROOT = Path(__file__).resolve().parents[1]
-if str(ROOT) not in sys.path:
-    sys.path.insert(0, str(ROOT))
-
-from app.core.config import settings
-from app.api.v1.endpoints import search as search_ep
-from app.api.v1.endpoints import chat as chat_ep
-from app.api.v1.endpoints import files as files_ep
-from app.api.v1.schemas import ChatRequest
-from app.services import auth
-from app.services.bm25 import bm25_engine
+from backend.app.core.config import settings
+from backend.app.api.v1.endpoints import search as search_ep
+from backend.app.api.v1.endpoints import chat as chat_ep
+from backend.app.api.v1.endpoints import files as files_ep
+from backend.app.api.v1.schemas import ChatRequest
+from backend.app.services import auth
+from backend.app.services.bm25 import bm25_engine
 from starlette.datastructures import UploadFile
 
 

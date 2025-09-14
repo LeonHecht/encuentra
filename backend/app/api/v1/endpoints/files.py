@@ -3,10 +3,10 @@ from pathlib import Path
 from typing import List
 import uuid
 
-from app.services.bm25 import bm25_engine
-from app.core.config import settings
-from app.dependencies import get_current_user
-from app.services.auth import get_accessible_spaces, UserData
+from backend.app.services.bm25 import bm25_engine
+from backend.app.core.config import settings
+from backend.app.dependencies import get_current_user
+from backend.app.services.auth import get_accessible_spaces, UserData
 
 router = APIRouter()
 

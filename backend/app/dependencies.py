@@ -1,8 +1,8 @@
 from fastapi import Header, HTTPException
 from fastapi.security import HTTPBearer
 
-from app.services.auth import users_db, UserData
-from app.core.security import verify_access_token
+from .services.auth import users_db, UserData
+from .core.security import verify_access_token
 
 def get_current_user(authorization: str = Header(None)) -> UserData:
     if not authorization or not authorization.lower().startswith("bearer "):

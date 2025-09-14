@@ -1,9 +1,9 @@
 from fastapi import APIRouter, Query, HTTPException, Depends
 # from typing import List, Dict
 from ..schemas import SearchResponse, SearchResult
-from app.services.bm25 import bm25_engine
-from app.dependencies import get_current_user
-from app.services.auth import get_accessible_spaces, UserData
+from backend.app.services.bm25 import bm25_engine
+from backend.app.dependencies import get_current_user
+from backend.app.services.auth import get_accessible_spaces, UserData
 
 
 router = APIRouter()

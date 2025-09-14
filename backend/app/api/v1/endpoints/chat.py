@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Body
 from ..schemas import ChatRequest, ChatResponse, Citation
-from app.services.bm25 import bm25_engine      # later: transformer_engine, LLM
+from backend.app.services.bm25 import bm25_engine      # later: transformer_engine, LLM
 from time import sleep  # Simulate processing time
 
 router = APIRouter()
@@ -18,9 +18,7 @@ def chat(req: ChatRequest = Body(...)):
     file_url = None
     if hits:
         h = hits[0]
-        citation_objs.append(
-            Citation(doc_id=h["id"], snippet=h["snippet"])
-        )
+        citation_objs.append(Citation(doc_id=h["id"], snippet=h["snippet"]))
 
     if req.question.startswith("Qué dice el artículo 12"):
         dummy_answer = (
@@ -134,6 +132,5 @@ La Corte Suprema de Justicia declaró inadmisible el Recurso Extraordinario de C
 
     else:
         dummy_answer = "Lo siento, no encontré información sobre eso en la base de conocimiento."
-        citation_objs = []
 
     return ChatResponse(answer=dummy_answer, citations=citation_objs, file_url=file_url)

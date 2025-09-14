@@ -1,14 +1,14 @@
 from fastapi import APIRouter, Depends, HTTPException
 
-from app.api.v1.schemas import (
+from backend.app.api.v1.schemas import (
     LoginRequest,
     LoginResponse,
     SpaceCreateRequest,
     RegisterRequest,
     UserInfo,
 )
-from app.dependencies import get_current_user
-from app.services.auth import (
+from backend.app.dependencies import get_current_user
+from backend.app.services.auth import (
     authenticate,
     create_user_space,
     get_accessible_spaces,
@@ -17,7 +17,7 @@ from app.services.auth import (
     get_user,
     UserData,
 )
-from app.services.bm25 import bm25_engine
+from backend.app.services.bm25 import bm25_engine
 
 router = APIRouter()
 

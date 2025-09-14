@@ -4,11 +4,11 @@ from fastapi.staticfiles import StaticFiles
 from pathlib import Path
 from .core.config import settings
 from .api.v1.endpoints import search
-from app.services.bm25 import bm25_engine
+from .services.bm25 import bm25_engine
 from .api.v1.endpoints import files
-from app.api.v1.endpoints import chat
-from app.api.v1.endpoints import auth
-from app.services import auth as auth_service
+from .api.v1.endpoints import chat
+from .api.v1.endpoints import auth
+from .services import auth as auth_service
 
 
 app = FastAPI(
@@ -28,7 +28,9 @@ app.include_router(search.router, prefix=f"/{settings.API_VERSION}")
 app.include_router(files.router, prefix=f"/{settings.API_VERSION}")
 app.include_router(chat.router, prefix=f"/{settings.API_VERSION}")
 app.include_router(auth.router, prefix=f"/{settings.API_VERSION}")
-app.mount("/downloads", StaticFiles(directory="app/static/downloads"), name="downloads")
+
+static_dir = Path(__file__).resolve().parent / "static" / "downloads"
+app.mount("/downloads", StaticFiles(directory=static_dir), name="downloads")
 
 @app.get("/ping")
 def ping():
