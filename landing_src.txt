@@ -13,6 +13,23 @@ Currently, two official plugins are available:
 
 If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
 
+==== dist/index.html ====
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/png" href="/encuentra_logo_inverted-removebg.png" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>encuentra</title>
+    <script type="module" crossorigin src="/assets/index-QSElGl33.js"></script>
+    <link rel="stylesheet" crossorigin href="/assets/index-DFMMJlj2.css">
+  </head>
+  <!-- <body class="bg-[#F5F5F7]"> -->
+  <body class="bg-transparent">
+    <div id="root"></div>
+  </body>
+</html>
+
 ==== eslint.config.js ====
 import js from '@eslint/js'
 import globals from 'globals'
@@ -49,10 +66,12 @@ export default defineConfig([
 <html lang="es">
   <head>
     <meta charset="UTF-8" />
+    <link rel="icon" type="image/png" href="/encuentra_logo_inverted-removebg.png" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Encuentra — IA legal en español</title>
+    <title>encuentra</title>
   </head>
-  <body class="bg-[#f7f7f7]">
+  <!-- <body class="bg-[#F5F5F7]"> -->
+  <body class="bg-transparent">
     <div id="root"></div>
     <script type="module" src="/src/main.jsx"></script>
   </body>
@@ -69,6 +88,7 @@ export default defineConfig([
       "name": "landing",
       "version": "0.0.0",
       "dependencies": {
+        "@formspree/react": "^3.0.0",
         "react": "^19.1.0",
         "react-dom": "^19.1.0"
       },
@@ -988,6 +1008,30 @@ export default defineConfig([
         "node": "^18.18.0 || ^20.9.0 || >=21.1.0"
       }
     },
+    "node_modules/@formspree/core": {
+      "version": "4.0.0",
+      "resolved": "https://registry.npmjs.org/@formspree/core/-/core-4.0.0.tgz",
+      "integrity": "sha512-geNlUut5nME1Ztej5Pzx1BrlQ1fFIcJYIqmF+Vm0jaUbpZxjXvt7SDOGeQVkuxn80QJiIHlwBGGjSBFjPX/KDw==",
+      "license": "MIT",
+      "dependencies": {
+        "@stripe/stripe-js": "^5.7.0"
+      }
+    },
+    "node_modules/@formspree/react": {
+      "version": "3.0.0",
+      "resolved": "https://registry.npmjs.org/@formspree/react/-/react-3.0.0.tgz",
+      "integrity": "sha512-8PufBZ4l13VmCp9xTGQXwyF6mZtYSecqgTlFuMo5Fbe4Q6zUk7PMU2uKOwIaytZyTyJgFVCvdbpQElPPBKYNLw==",
+      "license": "MIT",
+      "dependencies": {
+        "@formspree/core": "^4.0.0",
+        "@stripe/react-stripe-js": "^3.1.1",
+        "@stripe/stripe-js": "^5.7.0"
+      },
+      "peerDependencies": {
+        "react": "^16.8 || ^17.0 || ^18.0 || ^19.0",
+        "react-dom": "^16.8 || ^17.0 || ^18.0 || ^19.0"
+      }
+    },
     "node_modules/@humanfs/core": {
       "version": "0.19.1",
       "resolved": "https://registry.npmjs.org/@humanfs/core/-/core-0.19.1.tgz",
@@ -1460,6 +1504,29 @@ export default defineConfig([
       "os": [
         "win32"
       ]
+    },
+    "node_modules/@stripe/react-stripe-js": {
+      "version": "3.7.0",
+      "resolved": "https://registry.npmjs.org/@stripe/react-stripe-js/-/react-stripe-js-3.7.0.tgz",
+      "integrity": "sha512-PYls/2S9l0FF+2n0wHaEJsEU8x7CmBagiH7zYOsxbBlLIHEsqUIQ4MlIAbV9Zg6xwT8jlYdlRIyBTHmO3yM7kQ==",
+      "license": "MIT",
+      "dependencies": {
+        "prop-types": "^15.7.2"
+      },
+      "peerDependencies": {
+        "@stripe/stripe-js": ">=1.44.1 <8.0.0",
+        "react": ">=16.8.0 <20.0.0",
+        "react-dom": ">=16.8.0 <20.0.0"
+      }
+    },
+    "node_modules/@stripe/stripe-js": {
+      "version": "5.10.0",
+      "resolved": "https://registry.npmjs.org/@stripe/stripe-js/-/stripe-js-5.10.0.tgz",
+      "integrity": "sha512-PTigkxMdMUP6B5ISS7jMqJAKhgrhZwjprDqR1eATtFfh0OpKVNp110xiH+goeVdrJ29/4LeZJR4FaHHWstsu0A==",
+      "license": "MIT",
+      "engines": {
+        "node": ">=12.16"
+      }
     },
     "node_modules/@types/babel__core": {
       "version": "7.20.5",
@@ -2718,7 +2785,6 @@ export default defineConfig([
       "version": "4.0.0",
       "resolved": "https://registry.npmjs.org/js-tokens/-/js-tokens-4.0.0.tgz",
       "integrity": "sha512-RdJUflcE3cUzKiMqQgsCu06FPu9UdIJO0beYbPhHN4k6apgJtifcoCtT9bcxOpYBtpD2kCM6Sbzg4CausW/PKQ==",
-      "dev": true,
       "license": "MIT"
     },
     "node_modules/js-yaml": {
@@ -2847,6 +2913,18 @@ export default defineConfig([
       "integrity": "sha512-0KpjqXRVvrYyCsX1swR/XTK0va6VQkQM6MNo7PqW77ByjAhoARA8EfrP1N4+KlKj8YS0ZUCtRT/YUuhyYDujIQ==",
       "dev": true,
       "license": "MIT"
+    },
+    "node_modules/loose-envify": {
+      "version": "1.4.0",
+      "resolved": "https://registry.npmjs.org/loose-envify/-/loose-envify-1.4.0.tgz",
+      "integrity": "sha512-lyuxPGr/Wfhrlem2CL/UcnUc1zcqKAImBDzukY7Y5F/yQiNdko6+fRLevlw1HgMySw7f611UIY408EtxRSoK3Q==",
+      "license": "MIT",
+      "dependencies": {
+        "js-tokens": "^3.0.0 || ^4.0.0"
+      },
+      "bin": {
+        "loose-envify": "cli.js"
+      }
     },
     "node_modules/lru-cache": {
       "version": "5.1.1",
@@ -2994,7 +3072,6 @@ export default defineConfig([
       "version": "4.1.1",
       "resolved": "https://registry.npmjs.org/object-assign/-/object-assign-4.1.1.tgz",
       "integrity": "sha512-rJgTQnkUnH1sFw8yT6VSU3zD3sWmu6sZhIseY8VX+GRu3P6F7Fu+JNDoXfklElbLJSnc3FUQHVe4cU5hj+BcUg==",
-      "dev": true,
       "license": "MIT",
       "engines": {
         "node": ">=0.10.0"
@@ -3331,6 +3408,17 @@ export default defineConfig([
         "node": ">= 0.8.0"
       }
     },
+    "node_modules/prop-types": {
+      "version": "15.8.1",
+      "resolved": "https://registry.npmjs.org/prop-types/-/prop-types-15.8.1.tgz",
+      "integrity": "sha512-oj87CgZICdulUohogVAR7AjlC0327U4el4L6eAvOqCeudMDVU0NThNaV+b9Df4dXgSP1gXMTnPdhfe/2qDH5cg==",
+      "license": "MIT",
+      "dependencies": {
+        "loose-envify": "^1.4.0",
+        "object-assign": "^4.1.1",
+        "react-is": "^16.13.1"
+      }
+    },
     "node_modules/punycode": {
       "version": "2.3.1",
       "resolved": "https://registry.npmjs.org/punycode/-/punycode-2.3.1.tgz",
@@ -3382,6 +3470,12 @@ export default defineConfig([
       "peerDependencies": {
         "react": "^19.1.0"
       }
+    },
+    "node_modules/react-is": {
+      "version": "16.13.1",
+      "resolved": "https://registry.npmjs.org/react-is/-/react-is-16.13.1.tgz",
+      "integrity": "sha512-24e6ynE2H+OKt4kqsOvNd8kBpV65zoxbA4BVsEOB3ARVWQki/DHzaUoC5KuON/BiccDaCCTZBuOcfZs70kR8bQ==",
+      "license": "MIT"
     },
     "node_modules/react-refresh": {
       "version": "0.17.0",
@@ -4167,6 +4261,7 @@ export default defineConfig([
     "preview": "vite preview"
   },
   "dependencies": {
+    "@formspree/react": "^3.0.0",
     "react": "^19.1.0",
     "react-dom": "^19.1.0"
   },
@@ -4239,32 +4334,63 @@ export default {
 }
 
 ==== src/Landing.jsx ====
+import { useForm, ValidationError } from '@formspree/react';
 import Navbar from './components/Navbar';
 import Countdown from './components/Countdown';
 
 export default function Landing() {
+  const [state, handleSubmit] = useForm("xpwrewon");
+
+  /* ✅  Mensaje de éxito */
+  if (state.succeeded) {
+    return (
+      <div className="min-h-screen flex flex-col relative z-10">
+        <Navbar />
+        <main className="flex-1 grid place-items-center px-4">
+          <div className="
+              max-w-md              /* móvil */
+              md:max-w-xl                  /* ≥768 px */
+              bg-green-200   /* ligerísima transparencia sobre vídeo */
+              rounded-3xl shadow-xl
+              p-8 sm:p-10 space-y-8"
+          >
+            <h1 className="text-2xl font-bold text-center">¡Gracias por unirte! 🎉</h1>
+            <p className="text-gray-600 text-center">
+              Te avisaremos en cuanto abra la beta.<br />
+              Serás de los primeros en tener acceso prioritario.
+            </p>
+          </div>
+        </main>
+      </div>
+    );
+  }
+
   return (
-    <div className="h-screen flex flex-col bg-gray-50">
+    <div className="relative z-10 flex flex-col min-h-screen">
       {/* top bar */}
       <Navbar />
 
       {/* hero / card */}
       <main className="flex-1 flex items-center justify-center px-4">
-        <div className="w-full max-w-xl bg-white rounded-3xl shadow-xl p-8 sm:p-10 space-y-8">
+        <div className="
+            w-full max-w-md              /* móvil */
+            md:max-w-xl                  /* ≥768 px */
+            bg-white/90 md:bg-white/70   /* ligerísima transparencia sobre vídeo */
+            rounded-3xl shadow-xl
+            p-8 sm:p-10 space-y-8
+          ">
 
           <h1 className="text-2xl sm:text-3xl font-extrabold text-center">
-            Busca&nbsp;y&nbsp;chatea con tu<br className="hidden sm:block" /> jurisprudencia
+            Encuentra — Unirme a la Lista de Espera
           </h1>
 
           <p className="text-center text-sm sm:text-base text-gray-600">
-            Potenciado por IA&nbsp;avanzada en español.<br />
-            Lanzamiento β en&nbsp;<Countdown />
+            Número de lugares: 50<br />
+            Lanzamiento beta en&nbsp;<Countdown />
           </p>
 
           <form
-            name="waitlist"
-            method="POST"
-            data-netlify="true"
+            onSubmit={handleSubmit}
             className="space-y-4"
           >
             <input type="hidden" name="form-name" value="waitlist" />
@@ -4274,30 +4400,66 @@ export default function Landing() {
               name="email"
               required
               placeholder="tu@email.com"
-              className="w-full border rounded-2xl py-3 px-4 focus:outline-primary"
+              className="w-full py-3 px-4 border rounded-2xl
+                                focus:outline-none
+                                hover:bg-gray-50 transition-colors
+                                text-[16px]              /* evita zoom iOS */"
             />
+            <ValidationError prefix="Email" field="email" errors={state.errors} />
 
             <input
               type="text"
               name="nombre"
               placeholder="Nombre (opcional)"
-              className="w-full border rounded-2xl py-3 px-4 focus:outline-primary"
+              className="w-full py-3 px-4 border rounded-2xl
+                                focus:outline-none
+                                hover:bg-gray-50 transition-colors"
             />
+            <ValidationError prefix="Nombre" field="nombre" errors={state.errors} />
+            
+            <input
+              type="text"
+              name="institución"
+              placeholder="Institución (opcional)"
+              className="w-full py-3 px-4 border rounded-2xl
+                                focus:outline-none
+                                hover:bg-gray-50 transition-colors"
+            />
+            <ValidationError prefix="Institución" field="institución" errors={state.errors} />
 
             <button
               type="submit"
+              disabled={state.submitting}
               className="w-full px-8 py-3 bg-gray-200 text-gray-900 rounded-3xl hover:bg-gray-300 transition"
             >
-              Unirme a la lista de espera
+              {state.submitting ? 'Enviando…' : 'Unirme a la lista de espera'}
             </button>
           </form>
 
           <p className="text-xs text-gray-400 text-center">
-            No spam. Cancel anytime. © 2025 Encuentra
+            Inscripción sin ningún compromiso. No spam. © 2025 Encuentra
           </p>
         </div>
       </main>
     </div>
+  );
+}
+
+==== src/components/BackgroundVideo.jsx ====
+// src/components/BackgroundVideo.jsx
+export default function BackgroundVideo() {
+  return (
+    <video
+      className="absolute inset-0 w-full h-full object-cover hidden md:block -z-10 opacity-50"
+      autoPlay        // reproducción automática
+      loop            // se repite
+      muted           // sin sonido
+      playsInline     // evita pantalla completa forzada en iOS
+    >
+      <source src="/assets/encuentra_landing(2).mp4" type="video/mp4" />
+      {/* fallback para navegadores viejos */}
+      Tu navegador no soporta vídeo en HTML5.
+    </video>
   );
 }
 
@@ -4335,11 +4497,11 @@ import logo from '../assets/logo_full-removebg.png';
 export default function Navbar() {
   return (
     <nav className="w-full bg-white shadow-sm">
-      <div className="max-w-screen-lg mx-auto px-4 py-3 flex items-center justify-between">
+      <div className="w-full flex items-center px-4 py-3 justify-start">
         <img
           src={logo}
           alt="Encuentra logo"
-          className="h-8 w-auto sm:h-10" 
+          className="h-8 w-auto sm:h-8" 
         />
       </div>
     </nav>
@@ -4359,10 +4521,12 @@ export default function Navbar() {
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 import './index.css';
+import BackgroundVideo from "./components/BackgroundVideo.jsx";
 import Landing from './Landing';
 
 ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>
+    <BackgroundVideo />
     <Landing />
   </React.StrictMode>,
 );
