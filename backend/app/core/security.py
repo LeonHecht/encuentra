@@ -1,19 +1,28 @@
-from datetime import timedelta, datetime
-from jose import jwt, JWTError
+from __future__ import annotations
 
-SECRET_KEY = "change-me-to-a-long-random-string"
-ALGORITHM  = "HS256"
-ACCESS_TTL = timedelta(hours=8)          # how long tokens stay valid
+import uuid
+from typing import Dict
+
+# simple in-memory token store mapping token -> username
+tokens_db: Dict[str, str] = {}
 
 
-def create_access_token(data: dict, expires_delta: timedelta = ACCESS_TTL) -> str:
-    to_encode = data.copy()
-    to_encode["exp"] = datetime.utcnow() + expires_delta
-    return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+def create_access_token(data: dict) -> str:
+    """Return a new access token for the given payload.
+
+    The token is a random uuid mapped to the username (``sub``) in
+    an in-memory store so that the tests can inspect and the API can
+    validate it without external dependencies.
+    """
+    token = uuid.uuid4().hex
+    username = data.get("sub")
+    tokens_db[token] = username
+    return token
 
 
 def verify_access_token(token: str) -> dict:
-    try:
-        return jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-    except JWTError as e:
-        raise ValueError("Invalid token") from e
+    """Validate *token* and return a payload containing ``sub``."""
+    username = tokens_db.get(token)
+    if not username:
+        raise ValueError("Invalid token")
+    return {"sub": username}

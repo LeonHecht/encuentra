@@ -1,10 +1,9 @@
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional
-import uuid
 from pathlib import Path
 
-from app.core.config import settings
-from app.core.security import create_access_token
+from ..core.config import settings
+from ..core.security import create_access_token, tokens_db
 
 # Spaces that are accessible to all users
 PUBLIC_SPACES = ["supreme_court"]
@@ -25,7 +24,6 @@ class OrgData:
 
 users_db: Dict[str, UserData] = {}
 orgs_db: Dict[str, OrgData] = {}
-tokens_db: Dict[str, str] = {}
 
 
 def user_exists(username: str) -> bool:

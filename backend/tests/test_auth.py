@@ -1,15 +1,9 @@
-import sys
 from pathlib import Path
 
 import pytest
 
-# Add backend directory to path for package imports
-ROOT = Path(__file__).resolve().parents[1]
-if str(ROOT) not in sys.path:
-    sys.path.insert(0, str(ROOT))
-
-from app.core.config import settings
-import app.services.auth as auth
+from backend.app.core.config import settings
+import backend.app.services.auth as auth
 
 
 @pytest.fixture()
@@ -44,10 +38,10 @@ def test_get_accessible_spaces(auth_env):
 
 
 def test_create_user_space_valid(auth_env):
-    path = auth.create_user_space("alice", "newspace")
-    assert path.exists() and path.is_dir()
+    space_key = auth.create_user_space("alice", "newspace")
     expected = Path(settings.DATA_UPLOAD) / "alice" / "newspace"
-    assert path == expected
+    assert expected.exists() and expected.is_dir()
+    assert space_key == "alice/newspace"
 
 
 def test_create_user_space_invalid(auth_env):
