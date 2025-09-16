@@ -9,6 +9,15 @@ class Settings(BaseSettings):
     CORPUS_PATH: str = "data/static_corpus"
     DATA_UPLOAD: str = "backend/app/api/data/user_uploads"
     
-    model_config = ConfigDict(env_file=".env")
+    OPENAI_API_KEY: str | None = None
+    OPENAI_CHAT_MODEL: str = "gpt-5-mini"
+    MAX_DOC_TOKENS: int = 2000
+    MAX_DOCS: int = 3
+
+    model_config = ConfigDict(
+        env_file=".env",
+        # keep forbidding unknowns (safer) now that we’ve added the fields
+        extra="forbid",
+    )
 
 settings = Settings()
