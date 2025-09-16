@@ -11,11 +11,15 @@ import re
 
 class BM25Search:
 
+    CHUNK_SIZE = 500
+    CHUNK_OVERLAP = 80
+
     def __init__(self) -> None:
-        
+
         self.corpus = {}
         self.tokenized = {}
         self.bm25_models = {}
+        self.doc_metadata = {}
 
     # helper to strip accents
     def strip_accents(self, s: str) -> str:
@@ -31,16 +35,57 @@ class BM25Search:
         tok = re.sub(r"[^a-z0-9]+", "", tok)
         return tok
 
+    def _chunk_document(self, text: str) -> list[dict]:
+        """Split a document into overlapping chunks."""
+
+        words = text.split()
+        if not words:
+            return []
+
+        chunk_size = max(self.CHUNK_SIZE, 1)
+        overlap = max(0, min(self.CHUNK_OVERLAP, chunk_size - 1))
+        step = max(chunk_size - overlap, 1)
+
+        normalized_words = [self.normalize_token(w) for w in words]
+
+        chunks: list[dict] = []
+        start = 0
+        chunk_idx = 0
+        while start < len(words):
+            end = start + chunk_size
+            chunk_words = words[start:end]
+            chunk_tokens = [tok for tok in normalized_words[start:end] if tok]
+            chunk_text = " ".join(chunk_words).strip()
+            if chunk_text and chunk_tokens:
+                chunks.append(
+                    {
+                        "chunk_idx": chunk_idx,
+                        "chunk_text": chunk_text,
+                        "tokens": chunk_tokens,
+                    }
+                )
+                chunk_idx += 1
+            start += step
+
+        return chunks
+
+    def _build_download_url(self, doc_id: str) -> str | None:
+        for ext in (".pdf", ".PDF", ".htm", ".html", ".HTML", ".docx", ".doc", ".txt"):
+            candidate = Path(settings.CORPUS_PATH) / "files" / f"{doc_id}{ext}"
+            if candidate.exists():
+                return f"/files/{candidate.name}"
+        return None
+
     def index(self, space="supreme_court"):
         """Load documents from CORPUS_PATH into BM25 index."""
         
         print("Loading corpus and initializing BM25 index...")
-        
+
         self.corpus[space] = []  # dict to hold documents for the space
         self.tokenized[space] = []  # list to hold tokenized documents for the space
+        self.doc_metadata[space] = {}
 
         if space == "supreme_court":
-            self.tokenized[space] = []
             jsonl_file = Path(settings.CORPUS_PATH) / "corpus.jsonl"
             if jsonl_file.exists():
                 # Load JSONL format
@@ -51,17 +96,28 @@ class BM25Search:
                         except json.JSONDecodeError:
                             continue
                         
-                        doc_id = obj.get("id")
-                        
-                        title = obj.get("title", "")
-                        
-                        text = obj.get("text", "")
-                        
-                        content = f"{title} {text}".strip()
-                        tokens_norm = [self.normalize_token(w) for w in content.split()]
+                        doc_id_raw = obj.get("id")
+                        doc_id = str(doc_id_raw) if doc_id_raw is not None else f"{space}_{len(self.doc_metadata[space])}"
 
-                        self.corpus[space].append({"id": doc_id, "title": title, "text": content})
-                        self.tokenized[space].append(tokens_norm)
+                        title = obj.get("title", "")
+
+                        text = obj.get("text", "")
+
+                        content = f"{title} {text}".strip()
+                        self.doc_metadata[space][doc_id] = {"title": title}
+
+                        for chunk in self._chunk_document(content):
+                            chunk_id = f"{doc_id}#c{chunk['chunk_idx']}"
+                            self.corpus[space].append(
+                                {
+                                    "id": chunk_id,
+                                    "doc_id": doc_id,
+                                    "title": title,
+                                    "chunk_idx": chunk["chunk_idx"],
+                                    "chunk_text": chunk["chunk_text"],
+                                }
+                            )
+                            self.tokenized[space].append(chunk["tokens"])
             else:
                 raise Exception("corpus.jsonl file missing.")
         else:
@@ -69,9 +125,21 @@ class BM25Search:
             dir_path = Path(settings.DATA_UPLOAD) / space
             for file in dir_path.glob("**/*.txt"):
                 text = file.read_text(encoding="utf-8")
-                tokens = text.split()
-                self.corpus[space].append({"id": file.stem, "text": text})
-                self.tokenized[space].append(tokens)
+                doc_id = file.stem
+                title = file.stem
+                self.doc_metadata[space][doc_id] = {"title": title}
+                for chunk in self._chunk_document(text):
+                    chunk_id = f"{doc_id}#c{chunk['chunk_idx']}"
+                    self.corpus[space].append(
+                        {
+                            "id": chunk_id,
+                            "doc_id": doc_id,
+                            "title": title,
+                            "chunk_idx": chunk["chunk_idx"],
+                            "chunk_text": chunk["chunk_text"],
+                        }
+                    )
+                    self.tokenized[space].append(chunk["tokens"])
         # Build BM25
         tokens = self.tokenized[space]
         if tokens:
@@ -94,9 +162,9 @@ class BM25Search:
             Number of top results to return.
 
         Returns top_k results as list of dicts with:
-        - id: document ID
+        - id: chunk ID ("{doc_id}#c{i}")
         - score: BM25 score
-        - snippet: first 100 words of the text
+        - snippet: chunk text
         - download_url: path under /files to fetch the original doc
         """
         print(f"Searching in space '{space}' with query: '{query}' and top_k={top_k}")
@@ -123,34 +191,18 @@ class BM25Search:
             
         for i in top_indices:
             doc = self.corpus[space][i]
-            print(f"Processing document ID {doc['id']} with score {scores[i]:.4f}")
-            text = doc["text"]
-            print(f"Document text length: {len(text)} characters")
+            print(f"Processing chunk ID {doc['id']} with score {scores[i]:.4f}")
+            text = doc["chunk_text"]
+            print(f"Chunk text length: {len(text)} characters")
 
-            # find first exact match of any query term and take 50-word window
-            snippet = ""
-            doc_tokens = text.split()
-            for idx, orig_tok in enumerate(doc_tokens):
-                if self.normalize_token(orig_tok) in tokenized_query:
-                    start = max(idx - 25, 0)
-                    snippet_tokens = doc_tokens[start : start + 50]
-                    snippet = " ".join(snippet_tokens)
-                    break
-            
-            if snippet == "":
-                print(f"Warning: No snippet found for document ID {doc['id']}")
-                
-            # detect the actual file extension (pdf, html, docx, etc.)
-            file_url = None
-            for ext in (".pdf", ".PDF", ".htm", ".html", ".HTML", ".docx", ".doc", ".txt"):
-                candidate = Path(settings.CORPUS_PATH) / "files" / f"{doc['id']}{ext}"
-                if candidate.exists():
-                    file_url = f"/files/{candidate.name}"
-                    break
+            snippet = text
+
+            doc_id = doc["doc_id"]
+            file_url = self._build_download_url(doc_id)
             if file_url is None:
-                print(f"Warning: No file found for document ID {doc['id']}")
+                print(f"Warning: No file found for document ID {doc_id}")
 
-            title = doc.get("title") or ""
+            title = doc.get("title") or self.doc_metadata.get(space, {}).get(doc_id, {}).get("title", "")
             results.append({
                 "id": doc["id"],
                 "title": title,
