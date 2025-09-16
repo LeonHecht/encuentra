@@ -81,6 +81,18 @@ class BM25Search:
             self.bm25_models[space] = None
         print("Done loading corpus and initializing BM25 index.")
 
+    def get_document_by_id(self, space: str, doc_id: str) -> dict | None:
+        """
+        Return {"id","title","text"} for a given doc_id from the doc-level corpus.
+        """
+        corpus = getattr(self, "corpus", None) or getattr(self, "corpus_doc", None)
+        if corpus is None or space not in corpus:
+            return None
+        for d in corpus[space]:
+            # old engine used {"id", "title", "text"} at doc level
+            if d.get("id") == doc_id:
+                return d
+        return None
 
     def search(self, query: str, top_k: int = 30, space: str = "supreme_court") -> list[dict]:
         """
