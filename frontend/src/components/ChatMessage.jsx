@@ -1,12 +1,6 @@
-// src/components/ChatMessage.jsx
 import MarkdownText from "@/components/MarkdownText";
-import useTypewriterMarkdown from "@/hooks/useTypewriterMarkdown";
 
 export default function ChatMessage({ msg, baseUrl }) {
-  // siempre llamamos al hook; si no es bot devolvemos el texto completo
-  const content =
-    msg.role === "bot" ? useTypewriterMarkdown(msg.text) : msg.text;
-
   return (
     <div
       className={`p-4 rounded-3xl ${
@@ -16,9 +10,9 @@ export default function ChatMessage({ msg, baseUrl }) {
       }`}
     >
       {msg.role === "bot" ? (
-        <MarkdownText text={content} />          
+        <MarkdownText text={msg.text || ""} />
       ) : (
-        <p className="whitespace-pre-wrap">{content}</p>  
+        <p className="whitespace-pre-wrap">{msg.text || ""}</p>
       )}
 
       {msg.citations?.length > 0 && (

@@ -1,4 +1,8 @@
 from fastapi import APIRouter, Body, Depends, HTTPException
+from fastapi.responses import StreamingResponse
+from fastapi.encoders import jsonable_encoder
+import json
+
 from backend.app.api.v1.schemas import ChatRequest, ChatResponse, Citation
 from backend.app.services.bm25 import bm25_engine
 from backend.app.dependencies import get_current_user
@@ -96,3 +100,113 @@ def chat(req: ChatRequest = Body(...), user=Depends(get_current_user)):
         raise HTTPException(status_code=500, detail=f"OpenAI error: {e}")
 
     return ChatResponse(answer=answer, citations=citations, file_url=None)
+
+
+@router.post("/chat/stream", summary="Ask the legal assistant (streaming)")
+async def chat_stream(req: ChatRequest = Body(...), user=Depends(get_current_user)):
+    # 1) retrieve top documents with BM25 (doc-level)
+    hits = bm25_engine.search(req.question, top_k=max(5, MAX_DOCS), space=req.space)
+    if not hits:
+        # send one-line NDJSON with a final answer and no citations
+        def empty_gen():
+            yield json.dumps({
+                "type": "done",
+                "answer": "No encontré evidencia suficiente en el corpus.",
+                "citations": [],
+                "file_url": None
+            }) + "\n"
+        return StreamingResponse(empty_gen(), media_type="application/x-ndjson")
+
+    # 2) build context and citations
+    def approx_token_len(text: str) -> int:
+        return int(len(text.split()) * 0.75)
+
+    def truncate_to_tokens(text: str, max_tokens: int) -> str:
+        max_words = int(max_tokens / 0.75)
+        words = text.split()
+        if len(words) <= max_words:
+            return text
+        return " ".join(words[:max_words])
+
+    context_blocks = []
+    citations = []
+    used_docs = 0
+
+    for h in hits:
+        doc_id = h["id"]
+        doc = bm25_engine.get_document_by_id(req.space, doc_id)
+        if not doc:
+            continue
+        full_text = doc.get("text", "") or ""
+        if not full_text.strip():
+            continue
+
+        trimmed = truncate_to_tokens(full_text, MAX_DOC_TOKENS)
+        title = (doc.get("title") or "").strip()
+        header = f"({doc_id}) {title}".strip() if title else f"({doc_id})"
+        block = f"[{used_docs+1}] {header}\n{trimmed}"
+        context_blocks.append(block)
+
+        citations.append(Citation(doc_id=doc_id, snippet=trimmed[:240]))
+        used_docs += 1
+        if used_docs >= MAX_DOCS:
+            break
+
+    if not context_blocks:
+        def empty_gen2():
+            yield json.dumps({
+                "type": "done",
+                "answer": "No encontré evidencia suficiente en el corpus.",
+                "citations": [],
+                "file_url": None
+            }) + "\n"
+        return StreamingResponse(empty_gen2(), media_type="application/x-ndjson")
+
+    context_text = "\n\n---\n\n".join(context_blocks)
+
+    # 3) OpenAI streaming
+    messages = [
+        {"role": "system", "content": SYSTEM_PROMPT},
+        {
+            "role": "user",
+            "content": (
+                f"Pregunta: {req.question}\n\n"
+                f"Contexto (máx {MAX_DOCS} documentos, {MAX_DOC_TOKENS} tokens c/u):\n{context_text}\n\n"
+                "Instrucciones: Responde de manera concisa y cita con [doc_id]."
+            ),
+        },
+    ]
+
+    def gen():
+        try:
+            stream = client.chat.completions.create(
+                model=OPENAI_MODEL,
+                messages=messages,
+                stream=True,
+            )
+            parts = []
+            for chunk in stream:
+                delta = None
+                try:
+                    delta = chunk.choices[0].delta.content
+                except Exception:
+                    delta = None
+                if not delta:
+                    continue
+
+                parts.append(delta)
+                so_far = "".join(parts)
+                # Emit cumulative text instead of a delta
+                yield json.dumps({"type": "content", "text": so_far}) + "\n"
+
+            answer = "".join(parts)
+            yield json.dumps({
+                "type": "done",
+                "answer": answer,
+                "citations": jsonable_encoder(citations),
+                "file_url": None
+            }) + "\n"
+        except Exception as e:
+            yield json.dumps({"type": "error", "message": str(e)}) + "\n"
+
+    return StreamingResponse(gen(), media_type="application/x-ndjson")
