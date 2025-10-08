@@ -3,7 +3,7 @@ from pathlib import Path
 from typing import List
 import uuid
 
-from backend.app.services.bm25 import bm25_engine
+from backend.app.services.search import search_engine
 from backend.app.core.config import settings
 from backend.app.dependencies import get_current_user
 from backend.app.services.auth import get_accessible_spaces, UserData
@@ -48,7 +48,7 @@ async def upload_file(
         })
 
     # Rebuild index for this space so the new docs are searchable
-    bm25_engine.index(space)
+    search_engine.index(space)
 
     return {
         "space": space,

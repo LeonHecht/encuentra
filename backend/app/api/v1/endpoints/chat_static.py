@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Body
 from ..schemas import ChatRequest, ChatResponse, Citation
-from backend.app.services.bm25 import bm25_engine      # later: transformer_engine, LLM
+from backend.app.services.search import search_engine      # later: transformer_engine, LLM
 from time import sleep  # Simulate processing time
 
 router = APIRouter()
@@ -13,7 +13,7 @@ def chat(req: ChatRequest = Body(...)):
     2. Return a placeholder answer.
     """
     sleep(1)  # Simulate processing time
-    hits = bm25_engine.search(req.question, top_k=1, space=req.space)
+    hits = search_engine.search(req.question, top_k=1, space=req.space)
     citation_objs = []
     file_url = None
     if hits:

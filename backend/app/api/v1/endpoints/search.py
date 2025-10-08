@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Query, HTTPException, Depends
 # from typing import List, Dict
 from ..schemas import SearchResponse, SearchResult
-from backend.app.services.bm25 import bm25_engine
+from backend.app.services.search import search_engine
 from backend.app.dependencies import get_current_user
 from backend.app.services.auth import get_accessible_spaces, UserData
 
@@ -23,9 +23,9 @@ def search(
     print(f"Received search query: '{q}' in space '{space}' with top_k={top_k}")
     if space not in get_accessible_spaces(user.username):
         raise HTTPException(403, detail="Space not accessible")
-    if space not in bm25_engine.bm25_models:
+    if not search_engine.has_space(space):
         raise HTTPException(400, detail=f"Unknown space '{space}'")
-    hits = bm25_engine.search(q, top_k, space)
+    hits = search_engine.search(q, top_k, space)
     results = [SearchResult(**hit) for hit in hits]
     return SearchResponse(query_log_id=1, results=results)
 

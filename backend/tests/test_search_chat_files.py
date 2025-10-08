@@ -1,5 +1,6 @@
 from pathlib import Path
 import io
+
 import pytest
 
 from backend.app.core.config import settings
@@ -8,8 +9,14 @@ from backend.app.api.v1.endpoints import chat as chat_ep
 from backend.app.api.v1.endpoints import files as files_ep
 from backend.app.api.v1.schemas import ChatRequest
 from backend.app.services import auth
-from backend.app.services.bm25 import bm25_engine
+from backend.app.services.search import search_engine
 from starlette.datastructures import UploadFile
+
+
+pytestmark = pytest.mark.skipif(
+    settings.SEARCH_BACKEND != "bm25",
+    reason="Tests exercise the in-memory BM25 backend",
+)
 
 
 @pytest.fixture()
@@ -29,19 +36,19 @@ def test_env(tmp_path, monkeypatch):
     monkeypatch.setattr(search_ep, "get_accessible_spaces", lambda u: ["supreme_court", "alice/personal"])
 
     # Reset BM25 engine
-    bm25_engine.corpus.clear()
-    bm25_engine.tokenized.clear()
-    bm25_engine.bm25_models.clear()
+    search_engine.corpus.clear()
+    search_engine.tokenized.clear()
+    search_engine.bm25_models.clear()
 
     # Index the built-in supreme court corpus and a simple personal document
-    bm25_engine.index("supreme_court")
+    search_engine.index("supreme_court")
 
     # Create a simple document in alice's personal space
     uploads_dir = Path(settings.DATA_UPLOAD) / "alice" / "personal"
     uploads_dir.mkdir(parents=True, exist_ok=True)
     (uploads_dir / "doc1.txt").write_text("hello world test document", encoding="utf-8")
 
-    bm25_engine.index("alice/personal")
+    search_engine.index("alice/personal")
     return auth.get_user("alice")
 
 
@@ -69,7 +76,7 @@ def test_file_upload_creates_file_and_indexes(test_env, monkeypatch):
     def fake_index(space):
         indexed.append(space)
 
-    monkeypatch.setattr(bm25_engine, "index", fake_index)
+    monkeypatch.setattr(search_engine, "index", fake_index)
 
     import asyncio
     resp = asyncio.run(files_ep.upload_file(files=[uploaded], space="alice/personal", user=user))

@@ -4,7 +4,7 @@ from fastapi.encoders import jsonable_encoder
 import json
 
 from backend.app.api.v1.schemas import ChatRequest, ChatResponse, Citation
-from backend.app.services.bm25 import bm25_engine
+from backend.app.services.search import search_engine
 from backend.app.dependencies import get_current_user
 from openai import OpenAI
 from backend.app.core.config import settings
@@ -40,7 +40,7 @@ def truncate_to_tokens(text: str, max_tokens: int) -> str:
 @router.post("/chat", response_model=ChatResponse, summary="Ask the legal assistant (BM25-doc RAG)")
 def chat(req: ChatRequest = Body(...), user=Depends(get_current_user)):
     # 1) retrieve top documents with BM25 (doc-level)
-    hits = bm25_engine.search(req.question, top_k=max(5, MAX_DOCS), space=req.space)
+    hits = search_engine.search(req.question, top_k=max(5, MAX_DOCS), space=req.space)
     if not hits:
         return ChatResponse(answer="No encontré evidencia suficiente en el corpus.", citations=[])
 
@@ -51,7 +51,7 @@ def chat(req: ChatRequest = Body(...), user=Depends(get_current_user)):
 
     for h in hits:
         doc_id = h["id"]
-        doc = bm25_engine.get_document_by_id(req.space, doc_id)
+        doc = search_engine.get_document_by_id(req.space, doc_id)
         if not doc:
             continue
         full_text = doc.get("text", "") or ""
@@ -105,7 +105,7 @@ def chat(req: ChatRequest = Body(...), user=Depends(get_current_user)):
 @router.post("/chat/stream", summary="Ask the legal assistant (streaming)")
 async def chat_stream(req: ChatRequest = Body(...), user=Depends(get_current_user)):
     # 1) retrieve top documents with BM25 (doc-level)
-    hits = bm25_engine.search(req.question, top_k=max(5, MAX_DOCS), space=req.space)
+    hits = search_engine.search(req.question, top_k=max(5, MAX_DOCS), space=req.space)
     if not hits:
         # send one-line NDJSON with a final answer and no citations
         def empty_gen():
@@ -134,7 +134,7 @@ async def chat_stream(req: ChatRequest = Body(...), user=Depends(get_current_use
 
     for h in hits:
         doc_id = h["id"]
-        doc = bm25_engine.get_document_by_id(req.space, doc_id)
+        doc = search_engine.get_document_by_id(req.space, doc_id)
         if not doc:
             continue
         full_text = doc.get("text", "") or ""

@@ -17,7 +17,7 @@ from backend.app.services.auth import (
     get_user,
     UserData,
 )
-from backend.app.services.bm25 import bm25_engine
+from backend.app.services.search import search_engine
 
 router = APIRouter()
 
@@ -69,5 +69,5 @@ def create_space(req: SpaceCreateRequest, user: UserData = Depends(get_current_u
         space_key = create_user_space(user.username, req.name)
     except ValueError as e:
         raise HTTPException(400, detail=str(e))
-    bm25_engine.index(str(space_key))
+    search_engine.index(str(space_key))
     return {"space": space_key}

@@ -33,7 +33,7 @@ class BM25Search:
 
     def index(self, space="supreme_court"):
         """Load documents from CORPUS_PATH into BM25 index."""
-        
+
         print("Loading corpus and initializing BM25 index...")
         
         self.corpus[space] = []  # dict to hold documents for the space
@@ -80,6 +80,10 @@ class BM25Search:
         else:
             self.bm25_models[space] = None
         print("Done loading corpus and initializing BM25 index.")
+
+    def has_space(self, space: str) -> bool:
+        model = self.bm25_models.get(space)
+        return model is not None
 
     def get_document_by_id(self, space: str, doc_id: str) -> dict | None:
         """
