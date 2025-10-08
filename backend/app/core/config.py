@@ -10,7 +10,7 @@ class Settings(BaseSettings):
     DATA_UPLOAD: str = "backend/app/api/data/user_uploads"
 
     # Search backend configuration
-    SEARCH_BACKEND: str = "bm25"  # bm25 | opensearch
+    SEARCH_BACKEND: str = "opensearch"  # bm25 | opensearch
     OPENSEARCH_HOSTS: str = "http://localhost:9200"
     OPENSEARCH_INDEX_PREFIX: str = "encuentra"
     OPENSEARCH_USERNAME: str | None = None
@@ -21,7 +21,7 @@ class Settings(BaseSettings):
     OPENSEARCH_BULK_CHUNK_SIZE: int = 500
 
     OPENAI_API_KEY: str | None = None
-    OPENAI_CHAT_MODEL: str = "gpt-5-mini"
+    OPENAI_CHAT_MODEL: str = "gpt-5-nano"
     MAX_DOC_TOKENS: int = 2000
     MAX_DOCS: int = 3
 

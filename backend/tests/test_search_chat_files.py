@@ -1,5 +1,11 @@
 from pathlib import Path
 import io
+from dotenv import load_dotenv
+import os
+
+# Load the .env file from project root (2 levels up from /backend/tests)
+load_dotenv(dotenv_path=Path(__file__).resolve().parents[2] / ".env")
+assert os.getenv("OPENAI_API_KEY"), "⚠️ Missing OPENAI_API_KEY in environment!"
 
 import pytest
 
@@ -61,7 +67,7 @@ def test_search_basic(test_env):
 
 
 def test_chat_basic(test_env):
-    req = ChatRequest(question="resolucion?", space="supreme_court")
+    req = ChatRequest(question="Dame un resumen del caso Hans Friedrich Meyer?", space="supreme_court")
     resp = chat_ep.chat(req)
     assert isinstance(resp.answer, str) and resp.answer
     # At least one citation from the indexed corpus
