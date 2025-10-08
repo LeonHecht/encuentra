@@ -155,12 +155,11 @@ class OpenSearchSearch:
                         continue
                     title = obj.get("title", "")
                     text = obj.get("text", "")
-                    content = f"{title} {text}".strip()
                     documents.append(
                         {
                             "id": doc_id,
                             "title": title,
-                            "text": content,
+                            "text": text,
                             "space": space,
                             "download_url": self._resolve_download_url(doc_id),
                         }
@@ -187,6 +186,17 @@ class OpenSearchSearch:
 
         return documents
 
+    def _alias_name(self, space: str) -> str:
+        # stable alias clients will search against
+        safe = space.replace("/", "__").replace(" ", "_").lower()
+        safe = re.sub(r"[^a-z0-9_\-]+", "-", safe)
+        return f"{settings.OPENSEARCH_INDEX_PREFIX}-{safe}"
+
+    def _build_index_name(self, space: str, suffix: str) -> str:
+        # concrete index name for a build (timestamp)
+        base = self._alias_name(space)
+        return f"{base}-{suffix}"
+
     def _bulk_actions(self, index_name: str, docs: Iterable[dict[str, Any]]):
         for doc in docs:
             yield {
@@ -201,26 +211,46 @@ class OpenSearchSearch:
     # ------------------------------------------------------------------
     def index(self, space: str = "supreme_court") -> None:
         client = self._get_client()
-        index_name = self._index_name(space)
+        alias = self._alias_name(space)
 
         documents = self._load_documents(space)
         if not documents:
-            # Ensure stale data is removed if the space becomes empty.
-            client.indices.delete(index=index_name, ignore=[400, 404])
             print(f"[OpenSearch] No documents to index for space '{space}'.")
             return
 
-        # Drop the existing index to keep things in sync with the filesystem snapshot.
-        client.indices.delete(index=index_name, ignore=[400, 404])
-        self._create_index_if_needed(client, index_name)
+        build_name = self._build_index_name(space, suffix=str(int(__import__("time").time())))
 
+        # create build index (mapping/analyzer same as before)
+        self._create_index_if_needed(client, build_name)
+
+        # bulk index into build
         helpers.bulk(
             client,
-            self._bulk_actions(index_name, documents),
+            self._bulk_actions(build_name, documents),
             chunk_size=settings.OPENSEARCH_BULK_CHUNK_SIZE,
             refresh="wait_for",
+            raise_on_error=False,
+            raise_on_exception=False,
         )
-        print(f"[OpenSearch] Indexed {len(documents)} documents into '{index_name}'.")
+
+        # alias swap (atomic)
+        actions = []
+        if client.indices.exists_alias(name=alias):
+            olds = list(client.indices.get_alias(name=alias).keys())
+            for o in olds:
+                actions.append({"remove": {"index": o, "alias": alias}})
+        actions.append({"add": {"index": build_name, "alias": alias}})
+        client.indices.update_aliases({"actions": actions})
+
+        # optional: clean up old indices with same prefix (keep last N)
+        keep_n = 2
+        all_idxs = [i for i in client.indices.get_alias(index=f"{alias}-*").keys()]
+        # sort by name (timestamp suffix makes this work)
+        for old in sorted(all_idxs)[:-keep_n]:
+            if old != build_name:
+                client.indices.delete(index=old, ignore=[404])
+
+        print(f"[OpenSearch] Indexed {len(documents)} docs into alias '{alias}' via '{build_name}'.")
 
     def has_space(self, space: str) -> bool:
         client = self._get_client()
@@ -229,9 +259,9 @@ class OpenSearchSearch:
 
     def search(self, query: str, top_k: int = 30, space: str = "supreme_court") -> list[dict[str, Any]]:
         client = self._get_client()
-        index_name = self._index_name(space)
-        if not client.indices.exists(index=index_name):
-            print(f"[OpenSearch] Index '{index_name}' missing for space '{space}'.")
+        alias = self._alias_name(space)
+        if not client.indices.exists_alias(name=alias):
+            print(f"[OpenSearch] Alias '{alias}' missing for space '{space}'.")
             return []
 
         body = {
@@ -253,7 +283,7 @@ class OpenSearchSearch:
             },
         }
 
-        response = client.search(index=index_name, body=body)
+        response = client.search(index=alias, body=body)
         hits: list[dict[str, Any]] = []
         for hit in response.get("hits", {}).get("hits", []):
             source = hit.get("_source", {})
@@ -278,9 +308,9 @@ class OpenSearchSearch:
 
     def get_document_by_id(self, space: str, doc_id: str) -> dict[str, Any] | None:
         client = self._get_client()
-        index_name = self._index_name(space)
+        alias = self._alias_name(space)
         try:
-            doc = client.get(index=index_name, id=doc_id)
+            doc = client.get(index=alias, id=doc_id)
         except NotFoundError:
             return None
 
