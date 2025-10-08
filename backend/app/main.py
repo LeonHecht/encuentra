@@ -4,7 +4,7 @@ from fastapi.staticfiles import StaticFiles
 from pathlib import Path
 from .core.config import settings
 from .api.v1.endpoints import search
-from .services.bm25 import bm25_engine
+from .services.search import search_engine
 from .api.v1.endpoints import files
 from .api.v1.endpoints import chat
 from .api.v1.endpoints import auth
@@ -40,10 +40,10 @@ def ping():
 @app.on_event("startup")
 def on_startup():
     auth_service.init_data()
-    bm25_engine.index(space="supreme_court")
+    search_engine.index(space="supreme_court")
     uploads_root = Path(settings.DATA_UPLOAD)
     if uploads_root.exists():
         for path in uploads_root.glob("*/*"):
             if path.is_dir():
                 rel = path.relative_to(uploads_root)
-                bm25_engine.index(space=str(rel))
+                search_engine.index(space=str(rel))
