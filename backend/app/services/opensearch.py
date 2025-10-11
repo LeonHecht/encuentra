@@ -206,10 +206,22 @@ class OpenSearchSearch:
                 "_source": doc,
             }
 
+    def _wait_for_cluster(self, timeout=30):
+        c = self._get_client()
+        import time
+        for _ in range(timeout):
+            try:
+                c.cluster.health(wait_for_status="yellow", request_timeout=5)
+                return
+            except Exception:
+                time.sleep(1)
+        raise RuntimeError("OpenSearch not ready")
+    
     # ------------------------------------------------------------------
     # Public API (mirrors BM25Search)
     # ------------------------------------------------------------------
     def index(self, space: str = "supreme_court") -> None:
+        self._wait_for_cluster()
         client = self._get_client()
         alias = self._alias_name(space)
 
@@ -240,7 +252,7 @@ class OpenSearchSearch:
             for o in olds:
                 actions.append({"remove": {"index": o, "alias": alias}})
         actions.append({"add": {"index": build_name, "alias": alias}})
-        client.indices.update_aliases({"actions": actions})
+        client.indices.update_aliases(body={"actions": actions})
 
         # optional: clean up old indices with same prefix (keep last N)
         keep_n = 2
