@@ -21,7 +21,7 @@ export default function Chat() {
       .catch((e) => console.error("Failed to fetch spaces", e));
   }, []);
 
-  const askBot = async (e) => {
+  const askBot = (e) => {
     e.preventDefault();
     if (!question.trim()) return;
 
@@ -33,8 +33,8 @@ export default function Chat() {
     // 2) auth headers similar to useApi
     const raw = localStorage.getItem("auth");
     const token = raw ? JSON.parse(raw).token : null;
-    const headers = { "Content-Type": "application/json" };
-    if (token) headers["Authorization"] = `Bearer ${token}`;
+    // const headers = { "Content-Type": "application/json" };
+    // if (token) headers["Authorization"] = `Bearer ${token}`;
 
     // 3) insert placeholder bot message; we'll set cumulative text as it streams
     setMessages((m) => [
@@ -42,75 +42,65 @@ export default function Chat() {
       { role: "bot", text: "", citations: [], file_url: null, streaming: true },
     ]);
 
-    try {
-      const res = await fetch(`${API_BASE}/v1/chat/stream`, {
-        method: "POST",
-        headers,
-        body: JSON.stringify({ question, space }),
-      });
-      if (!res.ok || !res.body) {
-        throw new Error(`Stream error ${res.status}`);
-      }
+    const paramsObj = {
+      space,
+      messages: JSON.stringify(
+        [...messages, { role: "user", text: question }].map(m => ({
+          role: m.role === "bot" ? "assistant" : m.role,
+          content: m.text ?? ""
+        }))
+      ),
+      ...(token ? { token } : {}),
+    };
 
-      const reader = res.body.getReader();
-      const decoder = new TextDecoder("utf-8");
-      let buffer = "";
+    const params = new URLSearchParams(paramsObj);
 
-      while (true) {
-        const { value, done } = await reader.read();
-        if (done) break;
+    // If using cookie auth, pass { withCredentials: true }
+    const es = new EventSource(`${API_BASE}/v1/chat/stream?${params.toString()}`);
 
-        buffer += decoder.decode(value, { stream: true });
-
-        // Split by newline (NDJSON), keep last partial in buffer
-        let lines = buffer.split("\n");
-        buffer = lines.pop() || "";
-
-        for (const rawLine of lines) {
-          const line = rawLine.trim();
-          if (!line) continue;
-
-          let evt;
-          try {
-            evt = JSON.parse(line);
-          } catch {
-            continue;
-          }
-
-          if (evt.type === "content") {
-            const text = evt.text ?? "";
-            // Assign cumulative text directly (no appending)
-            setMessages((m) => {
-              const copy = [...m];
-              const last = copy[copy.length - 1];
-              if (last?.role === "bot") {
-                last.text = text;
-              }
-              return copy;
-            });
-          } else if (evt.type === "done") {
-            setMessages((m) => {
-              const copy = [...m];
-              const last = copy[copy.length - 1];
-              if (last?.role === "bot") {
-                last.text = evt.answer ?? last.text ?? "";
-                last.citations = evt.citations || [];
-                last.file_url = evt.file_url || null;
-                last.streaming = false;
-              }
-              return copy;
-            });
-          } else if (evt.type === "error") {
-            console.error("Stream error:", evt.message);
-          }
-        }
-      }
-    } catch (err) {
-      console.error("Streaming failed", err);
-    } finally {
-      setQuestion("");
+    const close = () => {
+      es.close();
       setLoading(false);
-    }
+      setQuestion("");
+    };
+
+    es.addEventListener("content", (ev) => {
+      const { delta } = JSON.parse(ev.data || "{}");
+      if (typeof delta !== "string") return;
+      setMessages((m) => {
+        const copy = [...m];
+        const last = copy[copy.length - 1];
+        if (last?.role === "bot") {
+          last.text = (last.text || "") + delta; // append tokens
+        }
+        return copy;
+      });
+    });
+
+    es.addEventListener("done", (ev) => {
+      try {
+        const data = JSON.parse(ev.data || "{}");
+        setMessages((m) => {
+          const copy = [...m];
+          const last = copy[copy.length - 1];
+          if (last?.role === "bot") {
+            last.text = data.answer ?? last.text ?? "";
+            last.citations = data.citations || [];
+            last.file_url = data.file_url || null;
+            last.streaming = false;
+          }
+          return copy;
+        });
+      } catch {}
+      close();
+    });
+
+    es.addEventListener("open", () => console.log("SSE open"));
+
+    es.addEventListener("error", (e) => {
+      console.error("SSE error", e);
+      close();
+    });
   };
 
   return (
