@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from fastapi.responses import StreamingResponse
 from typing import List, Dict, Any
 import json
+import textwrap
 from openai import OpenAI
 from backend.app.core.config import settings
 from backend.app.services.search import search_engine
@@ -11,7 +12,7 @@ router = APIRouter()
 client = OpenAI()
 
 SYSTEM_PROMPT_V1 = """
-Legal RAG Assistant — System Prompt (v2)
+Legal RAG Assistant — System Prompt
 
 Role & audience
 ---------------
@@ -81,10 +82,40 @@ Batch large requests.
 
 TEST_SYS_PROMPT = """
 You are a legal assistant. Answer in the language of the user.
+Operational rule: First, emit a single function call to `report_trace` with a brief plan (2–6 bullets),
+then proceed to call tools as needed. Keep the plan concise and non-sensitive.
 """
 
-
 tools = [
+    {
+        "type": "function",
+        "name": "report_trace",
+        "description": "Provide a brief, non-sensitive plan and the tools you intend to call next.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+            "plan": {
+                "type": "array",
+                "items": { "type": "string" },
+                "description": "2–6 concise bullets describing the approach. Give a short reason for each step.",
+                "minItems": 1,
+                "maxItems": 6
+            },
+            "intended_tools": {
+                "type": "array",
+                "items": { "type": "string", "enum": ["search_cases", "fetch_passages", "fetch_document"] },
+                "description": "Which tools you’ll likely use, in rough order.",
+                "minItems": 0,
+                "maxItems": 5
+            },
+            "stop_condition": {
+                "type": "string",
+                "description": "When you’ll stop calling tools."
+            }
+            },
+            "required": ["plan"]
+        }
+    },
     {
         "type": "function",
         "name": "search_cases",
@@ -136,6 +167,24 @@ tools = [
         }
     }
 ]
+
+def log_tool_call(step: int, name: str, args: dict, result: Any):
+    # keep logs readable & bounded
+    args_preview = json.dumps(args, ensure_ascii=False)[:1000]
+    if isinstance(result, (dict, list)):
+        # count-y summary to avoid dumping full payloads
+        if isinstance(result, list):
+            result_info = f"list(len={len(result)})"
+        else:
+            result_info = f"dict(keys={list(result.keys())[:6]})"
+    else:
+        result_info = str(result)[:300]
+    print(textwrap.dedent(f"""
+    🧰 Tool Step {step}
+    ├─ name: {name}
+    ├─ args: {args_preview}
+    └─ result: {result_info}
+    """).rstrip())
 
 def search_cases(query: str, space: str = "", filters: Dict[str, Any] = {}, top_k: int = 5) -> List[Dict[str, Any]]:
     """ query OpenSearch and return compact hits (IDs + short snippets + meta)
@@ -287,7 +336,7 @@ async def chat_agentic(request: Request, response: Response):
     citations = []
 
     keep_reasoning = True
-    max_iterations = 4
+    max_iterations = 6
     iteration_count = 0
 
     while keep_reasoning and iteration_count < max_iterations:
@@ -308,30 +357,59 @@ async def chat_agentic(request: Request, response: Response):
         openai_messages += response.output
 
         for item in response.output:
+            print(f"Response type: {item.type}")
+            if item.type == "reasoning":
+                print("🧠 **Model took reasoning step**")
+                # Continue the loop to let the model decide next action
+                continue
             if item.type == "function_call":
                 tool_name = item.name      # ["search_cases", "fetch_passages", "fetch_document"]
                 print(f"\n🔧 **Model triggered a tool call:** {tool_name}")
 
-                if tool_name == "search_cases":
+                if tool_name == "report_trace":
+                    try:
+                        plan = json.loads(item.arguments or "{}")
+                    except Exception:
+                        plan = {}
+                    print("\n🧭 Plan from model:")
+                    for i, s in enumerate(plan.get("plan", []), 1):
+                        print(f"  {i}. {s}")
+                    print(f"   intended_tools: {plan.get('intended_tools', [])}")
+                    if plan.get("stop_condition"):
+                        print(f"   stop_condition: {plan['stop_condition']}")
+                    # Ack back so the model knows we recorded it
+                    openai_messages.append({
+                        "type": "function_call_output",
+                        "call_id": item.call_id,
+                        "output": json.dumps({"ok": True})
+                    })
+                    # don't set keep_reasoning=False; this is just a preface
+                    continue
+                elif tool_name == "search_cases":
                     tool_args = json.loads(item.arguments)
                     query = tool_args.get("query", last_user_msg)
                     filters = tool_args.get("filters", {})
                     top_k = int(tool_args.get("top_k", 5))
+                    print(f"Calling search_cases with query='{query}', filters={filters}, top_k={top_k}")
                     result = search_cases(query=query, space=space, filters=filters, top_k=top_k)
+                    log_tool_call(iteration_count, tool_name, tool_args, result)
 
                 elif tool_name == "fetch_passages":
                     tool_args = json.loads(item.arguments)
                     ids = tool_args.get("ids", [])
                     per_id = int(tool_args.get('per_id', 3))
                     max_tokens = int(tool_args.get('max_tokens', 350))
+                    print(f"Calling fetch_passages with ids={ids}, per_id={per_id}, max_tokens={max_tokens}")
                     result = fetch_passages(query=last_user_msg, ids=ids, space=space, per_id=per_id, max_tokens=max_tokens)
+                    log_tool_call(iteration_count, tool_name, tool_args, result)
                 
                 elif tool_name == "fetch_document":                    
                     tool_args = json.loads(item.arguments)
                     doc_id = tool_args.get("id", "")
                     max_tokens = int(tool_args.get("max_tokens", 2048))
-                    
+                    print(f"Calling fetch_document with id={doc_id}, max_tokens={max_tokens}")
                     result = fetch_document(id=doc_id, space=space, max_tokens=max_tokens)
+                    log_tool_call(iteration_count, tool_name, tool_args, result)
 
                 else:
                     print(f"❌ **Unknown tool name: {tool_name}**")
@@ -346,13 +424,14 @@ async def chat_agentic(request: Request, response: Response):
                     "call_id": item.call_id,
                     "output": str(result),
                 })
-            else:
+            elif item.type == "message":
                 # If no tool call is triggered, print the response directly.
                 print("💡 **Final Answer:**")
                 final_answer = response.output_text
                 print(final_answer)
                 keep_reasoning = False
-
+            else:
+                print(f"❓ **Unknown response type: {item.type}**")
     # # Good SSE headers (FastAPI sets content-type; add no-cache/keep-alive)
     # headers = {
     #     "Cache-Control": "no-cache",
