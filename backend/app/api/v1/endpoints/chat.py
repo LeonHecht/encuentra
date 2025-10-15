@@ -156,7 +156,7 @@ tools = [
     {
         "type": "function",
         "name": "fetch_document",
-        "description": "Return full text document (costly; avoid unless needed).",
+        "description": "Return full text document (costly; avoid unless needed (e.g. case summaries)).",
         "parameters": {
             "type":"object",
             "properties":{
