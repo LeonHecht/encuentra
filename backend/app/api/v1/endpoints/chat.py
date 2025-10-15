@@ -85,70 +85,91 @@ You are a legal assistant. Answer in the language of the user.
 
 
 tools = [
-  {
-    "type": "function",
-    "function": {
-      "name": "search_cases",
-      "description": "Lexical Keyword search (BM25) over indexed jurisprudence and laws.",
-      "parameters": {
-        "type": "object",
-        "properties": {
-          "query": { "type": "string", "description": "User intent in plain Spanish in keywords." },
-          "space": { "type": "string", "description": "Corpus scope (e.g., 'supreme_court' or user space)." },
-          "filters": {
+    {
+        "type": "function",
+        "name": "search_cases",
+        "description": "Lexical Keyword search (BM25) over indexed jurisprudence and laws.",
+        "parameters": {
             "type": "object",
             "properties": {
-              "year_from": { "type": "integer" },
-              "year_to":   { "type": "integer" },
-              "court":     { "type": "string" },
-              "matter":    { "type": "string" }
+                "query": {"type": "string", "description": "User intent in plain Spanish in keywords."},
+                "filters": {
+                    "type": "object",
+                    "properties": {
+                        "year_from": { "type": "integer" },
+                        "year_to":   { "type": "integer" },
+                        "court":     { "type": "string" },
+                        "matter":    { "type": "string" }
+                    },
+                    "additionalProperties": False
+                },
+                "top_k": { "type": "integer", "default": 5, "minimum": 1, "maximum": 50 },
             },
-            "additionalProperties": False
-          },
-          "top_k": { "type": "integer", "default": 5, "minimum": 1, "maximum": 50 },
-          "granularity": {
-            "type": "string",
-            "enum": ["doc", "chunk"],
-            "default": "doc",
-            "description": "Return doc-level hits, model can fetch passages later."
-          }
+            "required": ["query"]
+        }
+    },
+    {
+        "type": "function",
+        "name": "fetch_passages",
+        "description": "Return top passages for selected doc IDs (ordered).",
+        "parameters": {
+        "type":"object",
+        "properties":{
+            "ids":{"type":"array","items":{"type":"string"},"minItems":1,"maxItems":20},
+            "per_id":{"type":"integer","default":3,"minimum":1,"maximum":10},
+            "max_tokens":{"type":"integer","default":350,"minimum":64,"maximum":512},
         },
-        "required": ["query"]
-      }
+        "required":["ids"]
+        }
+    },
+    {
+        "type": "function",
+        "name": "fetch_document",
+        "description": "Return full text document (costly; avoid unless needed).",
+        "parameters": {
+            "type":"object",
+            "properties":{
+            "id":{"type":"string"},
+            "max_tokens":{"type":"integer","default":2048,"minimum":512,"maximum":4096}
+            },
+            "required":["id"]
+        }
     }
-  },
-  {
-    "type": "function",
-    "function": {
-      "name": "fetch_passages",
-      "description": "Return top passages for selected hit IDs (de-duped, ordered).",
-      "parameters": {
-        "type": "object",
-        "properties": {
-          "ids": { "type": "array", "items": { "type": "string" }, "minItems": 1, "maxItems": 20 },
-          "per_id": { "type": "integer", "default": 3, "minimum": 1, "maximum": 10 },
-          "max_tokens": { "type": "integer", "default": 350, "minimum": 64, "maximum": 512 }
-        },
-        "required": ["ids"]
-      }
-    }
-  },
-  {
-    "type": "function",
-    "function": {
-      "name": "fetch_document",
-      "description": "Return full text document (only if necessary, costly).",
-      "parameters": {
-        "type": "object",
-        "properties": {
-          "id": { "type": "string" },
-          "max_tokens": { "type": "integer", "default": 2048, "minimum": 1024, "maximum": 4096 }
-        },
-        "required": ["id"]
-      }
-    }
-  }
 ]
+
+def search_cases(query: str, space: str = "", filters: Dict[str, Any] = {}, top_k: int = 5) -> List[Dict[str, Any]]:
+    """ query OpenSearch and return compact hits (IDs + short snippets + meta)
+    """
+    # perform search; Filters will be implemented lateron (TODO)
+    hits = search_engine.search(query=query, top_k=top_k, space=space)
+
+    # hits has [{"id", "title", "score", "snippet", "download_url"}]
+    return hits
+
+def fetch_passages(query: str, ids: List[str], space: str = "", per_id: int = 3, max_tokens: int = 350) -> List[Dict[str, Any]]:
+    """Return top passages for selected hit IDs (ordered). """
+    passages = []
+
+    for id in ids:
+        top_passages_for_id = search_engine.fetch_passages(space=space,
+                                                            doc_id=id,
+                                                            query=query,
+                                                            per_id=per_id,
+                                                            max_tokens=max_tokens)
+        passages.extend(top_passages_for_id)
+    
+    return passages
+
+def fetch_document(id: str, space: str = "", max_tokens: int = 2048) -> Dict[str, Any]:
+    doc = search_engine.get_document_by_id(space=space, doc_id=id)
+    if doc is None:
+        print("[fetch_document] Document not found:", id)
+    elif doc.get("text") == "":
+        print("[fetch_document] Document has empty text:", id)
+    return doc if doc is not None else {}
+
+def clip(s, max_chars=16000):
+    return s if len(s)<=max_chars else s[:max_chars]
 
 def sse(event: str, data: Dict[str, Any]) -> str:
     return f"event: {event}\n" + f"data: {json.dumps(data, ensure_ascii=False)}\n\n"
@@ -234,3 +255,122 @@ async def chat_stream(request: Request, response: Response):
         # "Access-Control-Allow-Credentials": "true",
     }
     return StreamingResponse(gen(), media_type="text/event-stream", headers=headers)
+
+
+@router.get("/chat/agentic")
+# async def chat_stream(request: Request, response: Response, user=Depends(get_current_user)):
+async def chat_agentic(request: Request, response: Response):
+    # print("Received /chat/stream request")
+
+    token = request.query_params.get("token")
+    # TODO: validate_token(token) -> raise HTTPException(401) if invalid
+
+    # Parse inputs
+    space = request.query_params.get("space") or ""
+    # print(f"Using space: '{space}'")
+    raw_messages = request.query_params.get("messages")
+    if not raw_messages:
+        raise HTTPException(status_code=400, detail="Missing messages")
+    
+    try:
+        msgs: List[Dict[str, str]] = json.loads(raw_messages)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid messages JSON")
+    
+    last_user_msg = msgs[-1]['content']
+
+    openai_messages = [
+        {"role": "user", "content": last_user_msg}
+    ]
+
+    final_answer = ""
+    citations = []
+
+    keep_reasoning = True
+    max_iterations = 4
+    iteration_count = 0
+
+    while keep_reasoning and iteration_count < max_iterations:
+        iteration_count += 1
+        print(f"\n🔄 **Reasoning Iteration {iteration_count}**")
+
+        response = client.responses.create(
+            model=settings.OPENAI_CHAT_MODEL,
+            instructions=TEST_SYS_PROMPT,
+            input=openai_messages,
+            tools=tools,
+            parallel_tool_calls=False,
+        )
+
+        print("\n✨ **Initial Response Output:**")
+        print(response.output)
+
+        openai_messages += response.output
+
+        for item in response.output:
+            if item.type == "function_call":
+                tool_name = item.name      # ["search_cases", "fetch_passages", "fetch_document"]
+                print(f"\n🔧 **Model triggered a tool call:** {tool_name}")
+
+                if tool_name == "search_cases":
+                    tool_args = json.loads(item.arguments)
+                    query = tool_args.get("query", last_user_msg)
+                    filters = tool_args.get("filters", {})
+                    top_k = int(tool_args.get("top_k", 5))
+                    result = search_cases(query=query, space=space, filters=filters, top_k=top_k)
+
+                elif tool_name == "fetch_passages":
+                    tool_args = json.loads(item.arguments)
+                    ids = tool_args.get("ids", [])
+                    per_id = int(tool_args.get('per_id', 3))
+                    max_tokens = int(tool_args.get('max_tokens', 350))
+                    result = fetch_passages(query=last_user_msg, ids=ids, space=space, per_id=per_id, max_tokens=max_tokens)
+                
+                elif tool_name == "fetch_document":                    
+                    tool_args = json.loads(item.arguments)
+                    doc_id = tool_args.get("id", "")
+                    max_tokens = int(tool_args.get("max_tokens", 2048))
+                    
+                    result = fetch_document(id=doc_id, space=space, max_tokens=max_tokens)
+
+                else:
+                    print(f"❌ **Unknown tool name: {tool_name}**")
+                    result = "Unknown tool"
+
+                # clip result to prevent context balooning (cost management)
+                result = clip(str(result))
+
+                # Append tool call and observation to messages for next iteration
+                openai_messages.append({
+                    "type": "function_call_output",
+                    "call_id": item.call_id,
+                    "output": str(result),
+                })
+            else:
+                # If no tool call is triggered, print the response directly.
+                print("💡 **Final Answer:**")
+                final_answer = response.output_text
+                print(final_answer)
+                keep_reasoning = False
+
+    # # Good SSE headers (FastAPI sets content-type; add no-cache/keep-alive)
+    # headers = {
+    #     "Cache-Control": "no-cache",
+    #     "Connection": "keep-alive",
+    #     # If you use cookies across origins:
+    #     # "Access-Control-Allow-Credentials": "true",
+    # }
+    return {
+        "answer": final_answer,
+        "citations": dedupe_citations(citations),
+        "tool_steps": iteration_count,
+        "trace_len": len(openai_messages),
+    }
+
+def dedupe_citations(cites: list[dict]) -> list[dict]:
+    seen = set(); out=[]
+    for c in cites:
+        did = c.get("doc_id")
+        if did and did not in seen:
+            out.append(c); seen.add(did)
+    return out

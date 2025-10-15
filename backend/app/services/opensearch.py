@@ -333,6 +333,100 @@ class OpenSearchSearch:
             "text": source.get("text", ""),
             "download_url": source.get("download_url"),
         }
+    
+    def fetch_passages(
+        self,
+        *,
+        space: str,
+        doc_id: str,
+        query: str,
+        per_id: int = 3,
+        max_tokens: int = 350,
+        chars_per_token: int = 4,   # ≈ Spanish tokens; tweak if you like
+    ) -> list[dict]:
+        """
+        Return up to `per_id` passages from the given doc (id=doc_id) that best match `query`.
+        Each passage is ~`max_tokens` tokens (approx via chars_per_token).
+        """
+        client = self._get_client()
+        alias = self._alias_name(space)
+        if not client.indices.exists_alias(name=alias):
+            return []
+
+        fragment_size = max(128, min(8192, int(max_tokens * chars_per_token)))
+
+        body = {
+            "size": 1,  # we only need this one doc
+            "query": {
+                "bool": {
+                    "must": [
+                        {"term": {"id": doc_id}},            # restrict to this doc
+                        {"multi_match": {                     # score relevance within the doc
+                            "query": query,
+                            "fields": ["title^2", "text"],
+                            "type": "best_fields",
+                        }},
+                    ]
+                }
+            },
+            # highlighter extracts top fragments by score
+            "highlight": {
+                "order": "score",
+                "fields": {
+                    "text": {
+                        "type": "unified",
+                        "fragment_size": fragment_size,
+                        "number_of_fragments": per_id,
+                        "no_match_size": fragment_size,  # fallback if no term hits
+                        "pre_tags": ["<em>"],
+                        "post_tags": ["</em>"],
+                    }
+                }
+            },
+            # optional: fetch the _score and only a small part of _source
+            "_source": {"includes": ["id", "title", "download_url"]},
+        }
+
+        res = client.search(index=alias, body=body)
+        hits = res.get("hits", {}).get("hits", [])
+        if not hits:
+            return []
+
+        hit = hits[0]
+        frags = hit.get("highlight", {}).get("text", []) or []
+
+        # Build normalized passages
+        passages = []
+        for i, frag in enumerate(frags[:per_id]):
+            passages.append({
+                "doc_id": doc_id,
+                "rank": i + 1,
+                "passage": frag,      # contains <em> .. </em> around matched terms
+                "approx_tokens": fragment_size // chars_per_token,
+                "score": float(hit.get("_score") or 0.0),
+                "title": hit.get("_source", {}).get("title", ""),
+                "download_url": hit.get("_source", {}).get("download_url"),
+            })
+
+        # If the highlighter produced nothing (rare), fallback to the beginning of the doc
+        if not passages:
+            print("[OpenSearch] Highlighter returned no passages; only returning snippet of document.")
+            doc = self.get_document_by_id(space, doc_id)
+            if not doc:
+                return []
+            text = doc.get("text", "") or ""
+            snippet = text[:fragment_size]
+            passages = [{
+                "doc_id": doc_id,
+                "rank": 1,
+                "passage": snippet,
+                "approx_tokens": fragment_size // chars_per_token,
+                "score": 0.0,
+                "title": doc.get("title", ""),
+                "download_url": doc.get("download_url"),
+            }]
+
+        return passages
 
 
 opensearch_engine = OpenSearchSearch()
