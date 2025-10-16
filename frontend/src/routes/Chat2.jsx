@@ -9,6 +9,7 @@ export default function Chat() {
   const [question, setQuestion] = useState("");
   const [spaces, setSpaces] = useState([]);
   const [space, setSpace] = useState("");
+  const [agentState, setAgentState] = useState(null); // opaque JSON string from backend
   const [loading, setLoading] = useState(false);
   const esRef = useRef(null);
 
@@ -99,20 +100,33 @@ export default function Chat() {
     if (!question.trim()) return;
 
     const userMsg = { role: "user", text: question };
+    const apiMsg = { role: "user", content: question };
+
     setMessages((m) => [...m, userMsg]);
     setQuestion("");
     setLoading(true);
 
     try {
-      // Send the whole conversation (role/content) like the backend expects.
-      const params = new URLSearchParams({
-        space,
-        messages: JSON.stringify(toChatAPIFormat([...messages, userMsg])),
-        ...(token ? { token } : {}),
+      const res = await fetch(`${API_BASE}/v1/chat/agentic`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({
+          space,
+          messages: [apiMsg], // just the last user msg
+          state: agentState || null, // carry agent tape
+        }),
       });
-      const res = await fetch(`${API_BASE}/v1/chat/agentic?${params.toString()}`);
+
       if (!res.ok) throw new Error(`agentic ${res.status}`);
+      
       const data = await res.json();
+      
+      // Save the new agent_state for the next turn
+      if (data.agent_state) setAgentState(data.agent_state);
+      
       setMessages((m) => [
         ...m,
         {
@@ -145,7 +159,7 @@ export default function Chat() {
         {messages.map((m, idx) => (
           <ChatMessage key={idx} msg={m} baseUrl={API_BASE} />
         ))}
-        {loading && <p className="text-slate-500">Generando…</p>}
+        {loading && <p className="text-slate-500">Pensando para darte una mejor respuesta…</p>}
       </div>
 
       <form className="flex-shrink-0 flex gap-2" onSubmit={sendStreaming}>
