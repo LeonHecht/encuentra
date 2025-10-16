@@ -1,154 +1,294 @@
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from fastapi.responses import StreamingResponse
 from typing import List, Dict, Any
+from pydantic import BaseModel
+from typing import Any
+
 import json
+import textwrap
 from openai import OpenAI
 from backend.app.core.config import settings
 from backend.app.services.search import search_engine
 from backend.app.dependencies import get_current_user
 
+
+class AgenticChatRequest(BaseModel):
+    space: str
+    messages: list[dict[str, Any]]   # role/content pairs
+    state: str | None = None
+
+
 router = APIRouter()
 client = OpenAI()
 
 SYSTEM_PROMPT_V1 = """
-Legal RAG Assistant — System Prompt (v2)
-
-Role & audience
----------------
-You are a precise, citation-driven legal assistant for El Salvador and LATAM case law.
+You are a precise, citation-driven legal assistant for El Salvador.
 Default to the user’s language. If the user writes in Spanish, answer in Spanish.
 
-When to use tools
------------------
-Use tools when a claim depends on corpus content (cases, statutes, Diario Oficial, internal docs).
-Answer directly (no tools) for general concepts/definitions or procedural how-tos that don’t require specific sources.
+## When to use tools
+- Use tools for claims that depend on specific sources from the corpus (cases, statutes, Diario Oficial, internal documents).
+- For general legal concepts, definitions, or procedural instructions that do not require a citation, answer directly without using tools.
 
-Planning loop (think → act → observe)
--------------------------------------
-1. Brief internal plan.
-2. If needed, call search_cases with a keyword-based query (for BM25 retriever).
-3. Pick 5–10 promising doc IDs; call fetch_passages (2–3 passages per doc).
-4. Summarize/answer with citations.
-5. If the user asked for a list of many items (e.g., “robbery 2014”): iterate in small batches (3–5 items per turn), then ask if they want more.
+## Planning loop
+0. If the user's message can be answered directly without searching the corpus, skip the planning loop and answer directly. Else:
+1. Rephrase the user's goal clearly, concisely, and in a friendly manner and emit a message informing the user via `emit_event`.
+2. If necessary, decompose the user's query into sub-queries. For each sub-query:
+- Brief internally on how to solve the sub-query.
+- Emit a single function call to `emit_event` with an elaborated plan in a user-friendly language (2–6 bullet points).
+- If corpus content is needed, call `search_cases` with a keyword-based query (for the BM25 retriever).
+- Select 5–10 promising document IDs and call `fetch_passages` for 2–3 passages per document.
+- Respond with bracketed citations after every factual claim based on retrieved text.
+- If the user asks for a summary of a specific case, call `fetch_document` instead of `fetch_passages`.
+- When you gathered all necessary information to provide the final answer back to the user. Do not include the user intent in your response, just respond naturally as if it was a normal conversation.
+- If at any point you need clarification or a selection from the user, respond with a clear prompt, so after getting back the clarification from the user, you can proceed with the reasoning. But try to assume the most likely intent of the user and avoid asking for clarifications unless absolutely necessary.
 
-Retrieval policy
-----------------
-- Start doc-level: search_cases(top_k=20); prefer precise queries over huge top_k.
-- Then passage-level: fetch_passages(ids=5..10, per_id=2..3, max_tokens≈350).
-- Avoid fetching full docs unless the user explicitly asks or the answer is impossible without it (like case summaries).
-- If query is ambiguous, ask a short clarifying question before searching.
+## Citations
+- Include bracketed citations: [DocID §short-hint] after any factual assertion based on a specific document.
+- Cite only documents actually reviewed through `fetch_passages` or `fetch_document`.
 
-Token budgets (hard limits)
----------------------------
-- Keep each tool result you pass into the model ≤ 4,096 tokens total.
-- Typical: 8 docs × 2 passages × ~120–150 tokens each.
-- Your final answer (without tool payloads) ≤ 350–500 tokens unless the user asks for a long brief.
-- If the user requests summaries for many cases, do them in batches and cache earlier summaries.
+## Output Format
+- Always use markdown format.
+- Deliver replies in the specific structure requested by the user (list, table, or outline) when applicable.
 
-Citations
----------
-- After any factual claim based on retrieved text, add bracketed citations: [DocID §short-hint].
-- Aggregate at paragraph ends when cleaner. Example:
-  “El tribunal aclaró X… [10DB52 §Hechos].”
-- Only cite docs you actually read via fetch_passages.
-
-Answer formats
---------------
-- If the user asks for a list/table/outline, return that structure (bullets or markdown table).
-- For summaries of multiple cases, use a numbered list; each item: 
-  Name/ID, Fecha, Hechos clave, Fallo, Relevancia, [citación].
-- If the user uploads text and asks for analysis, include a short Limitations note if corpus support is thin.
-
-Quality & safety
-----------------
+## Quality & Safety
 - Be concise, concrete, and neutral. 
-- No legal advice disclaimers unless asked, but avoid definitive prescriptions (“debes”)—use informative tone.
-- If results are thin or mixed, say so and suggest a refined search query.
+- Do not provide legal advice disclaimers unless explicitly requested.
+- Avoid definitive prescriptions (“debes”); maintain an informative tone.
+- If sourced information is insufficient or ambiguous, state this clearly and suggest a refined search.
+- Remember, you only have access to the local database containing legal documents from El Salvador and Paraguay, don't propose to the user to search any external databases or the internet (not possible).
 
-Examples of routing
--------------------
+## Examples of Query Routing
 - “¿Qué es hábeas corpus?” → Answer directly (no tools).
-- “Resume 5 casos de robo de 2014” → search → pick IDs → fetch passages → summarize 3–5 now → ask to continue.
-- “Dame jurisprudencia similar a X” → search with quoted key terms/entities → fetch → compare explicitly.
-
-Tool defaults (unless user specifies)
--------------------------------------
-search_cases.top_k = 5
-fetch_passages.per_id = 2–3
-fetch_passages.max_tokens ≈ 350
-Batch large requests.
+- “Resume 5 casos de robo de 2014” → Search → select IDs → fetch passages → summarize 3–5 cases → ask if the user wishes to continue.
+- “Dame jurisprudencia similar a X” → Search using quoted terms/entities → fetch → compare and summarize findings.
 """
 
-TEST_SYS_PROMPT = """
-You are a legal assistant. Answer in the language of the user.
-"""
+# TEST_SYS_PROMPT = """
+# You are a legal assistant. Answer in the language of the user.
+# Operational rule: First, emit a single function call to `report_trace` with a brief plan (2–6 bullets),
+# then proceed to call tools as needed. Keep the plan concise and non-sensitive.
+# """
 
+emit_msg_tool = {
+  "type": "function",
+  "name": "emit_event",
+  "description": "Emit a short, user-visible reasoning note (user's goal, plan, decision, progress).",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "kind": { "type": "string", "enum": ["user_goal", "plan","decision","note","progress"] },
+      "message": { "type": "string" },
+    },
+    "required": ["message"]
+  }
+}
+
+# finalizer_tool = {
+#   "type": "function",
+#   "name": "submit_answer",
+#   "description": "Call this exactly once when you are completely done or need clarification from the user. It returns a response message to the user.",
+#   "parameters": {
+#     "type": "object",
+#     "properties": {
+#       "answer": { "type": "string", "description": "Response to user." },
+#       "citations": {
+#         "type": "array",
+#         "items": { "type": "object", "properties": {
+#           "doc_id": { "type": "string" },
+#           "snippet": { "type": "string" }
+#         } },
+#         "description": "Optional citations used in the answer."
+#       }
+#     },
+#     "required": ["answer"]
+#   }
+# }
+
+# report_trace_tool = {
+#     "type": "function",
+#     "name": "report_trace",
+#     "description": "Provide a brief, non-sensitive plan and the tools you intend to call next.",
+#     "parameters": {
+#         "type": "object",
+#         "properties": {
+#         "plan": {
+#             "type": "array",
+#             "items": { "type": "string" },
+#             "description": "2–6 concise bullets describing the approach. Give a short reason for each step.",
+#             "minItems": 1,
+#             "maxItems": 6
+#         },
+#         "intended_tools": {
+#             "type": "array",
+#             "items": { "type": "string", "enum": ["search_cases", "fetch_passages", "fetch_document"] },
+#             "description": "Which tools you’ll likely use, in rough order.",
+#             "minItems": 0,
+#             "maxItems": 5
+#         },
+#         "stop_condition": {
+#             "type": "string",
+#             "description": "When you’ll stop calling tools."
+#         }
+#         },
+#         "required": ["plan"]
+#     }
+# }
+
+# request_user_input_tool = {
+#   "type": "function",
+#   "name": "request_user_input",
+#   "description": "Use this when you need the user to select or clarify before proceeding.",
+#   "parameters": {
+#     "type": "object",
+#     "properties": {
+#       "prompt": { "type": "string", "description": "Clear question to the user." }
+#     },
+#     "required": ["prompt"]
+#   }
+# }
 
 tools = [
-  {
-    "type": "function",
-    "function": {
-      "name": "search_cases",
-      "description": "Lexical Keyword search (BM25) over indexed jurisprudence and laws.",
-      "parameters": {
-        "type": "object",
-        "properties": {
-          "query": { "type": "string", "description": "User intent in plain Spanish in keywords." },
-          "space": { "type": "string", "description": "Corpus scope (e.g., 'supreme_court' or user space)." },
-          "filters": {
+    emit_msg_tool,
+    {
+        "type": "function",
+        "name": "search_cases",
+        "description": "Lexical Keyword search (BM25) over indexed jurisprudence and laws.",
+        "parameters": {
             "type": "object",
             "properties": {
-              "year_from": { "type": "integer" },
-              "year_to":   { "type": "integer" },
-              "court":     { "type": "string" },
-              "matter":    { "type": "string" }
+                "query": {"type": "string", "description": "User intent in plain Spanish in keywords."},
+                "filters": {
+                    "type": "object",
+                    "properties": {
+                        "year_from": { "type": "integer" },
+                        "year_to":   { "type": "integer" },
+                        "court":     { "type": "string" },
+                        "matter":    { "type": "string" }
+                    },
+                    "additionalProperties": False
+                },
+                "top_k": { "type": "integer", "default": 5, "minimum": 1, "maximum": 50 },
             },
-            "additionalProperties": False
-          },
-          "top_k": { "type": "integer", "default": 5, "minimum": 1, "maximum": 50 },
-          "granularity": {
-            "type": "string",
-            "enum": ["doc", "chunk"],
-            "default": "doc",
-            "description": "Return doc-level hits, model can fetch passages later."
-          }
+            "required": ["query"]
+        }
+    },
+    {
+        "type": "function",
+        "name": "fetch_passages",
+        "description": "Return top passages for selected doc IDs (ordered).",
+        "parameters": {
+        "type":"object",
+        "properties":{
+            "ids":{"type":"array","items":{"type":"string"},"minItems":1,"maxItems":20},
+            "per_id":{"type":"integer","default":3,"minimum":1,"maximum":10},
+            "max_tokens":{"type":"integer","default":350,"minimum":64,"maximum":512},
         },
-        "required": ["query"]
-      }
+        "required":["ids"]
+        }
+    },
+    {
+        "type": "function",
+        "name": "fetch_document",
+        "description": "Return full text document (costly; avoid unless needed (e.g. case summaries)).",
+        "parameters": {
+            "type":"object",
+            "properties":{
+            "id":{"type":"string"},
+            "max_tokens":{"type":"integer","default":2048,"minimum":512,"maximum":4096}
+            },
+            "required":["id"]
+        }
     }
-  },
-  {
-    "type": "function",
-    "function": {
-      "name": "fetch_passages",
-      "description": "Return top passages for selected hit IDs (de-duped, ordered).",
-      "parameters": {
-        "type": "object",
-        "properties": {
-          "ids": { "type": "array", "items": { "type": "string" }, "minItems": 1, "maxItems": 20 },
-          "per_id": { "type": "integer", "default": 3, "minimum": 1, "maximum": 10 },
-          "max_tokens": { "type": "integer", "default": 350, "minimum": 64, "maximum": 512 }
-        },
-        "required": ["ids"]
-      }
-    }
-  },
-  {
-    "type": "function",
-    "function": {
-      "name": "fetch_document",
-      "description": "Return full text document (only if necessary, costly).",
-      "parameters": {
-        "type": "object",
-        "properties": {
-          "id": { "type": "string" },
-          "max_tokens": { "type": "integer", "default": 2048, "minimum": 1024, "maximum": 4096 }
-        },
-        "required": ["id"]
-      }
-    }
-  }
 ]
+
+def sanitize_output_items(raw_items):
+    """Convert SDK output items to API-acceptable input items."""
+    sanitized = []
+    for it in raw_items or []:
+        obj = it.model_dump() if hasattr(it, "model_dump") else it
+        t = obj.get("type")
+
+        if t == "function_call":
+            sanitized.append({
+                "type": "function_call",
+                "name": obj.get("name"),
+                # must be a JSON STRING, not dict
+                "arguments": obj.get("arguments") or "{}",
+                "call_id": obj.get("call_id"),
+            })
+        elif t == "function_call_output":
+            sanitized.append({
+                "type": "function_call_output",
+                "call_id": obj.get("call_id"),
+                "output": obj.get("output", ""),
+            })
+        elif t == "message":
+            # keep only role+content (optional; you can drop messages entirely)
+            role = obj.get("role")
+            parts = obj.get("content") or []
+            text = ""
+            if isinstance(parts, list):
+                text = "".join(p.get("text","") for p in parts if isinstance(p, dict))
+            elif isinstance(parts, str):
+                text = parts
+            if role in ("user","assistant","system"):
+                sanitized.append({"role": role, "content": text})
+        else:
+            # drop 'reasoning' and anything else
+            continue
+    return sanitized
+
+def log_tool_call(step: int, name: str, args: dict, result: Any):
+    # keep logs readable & bounded
+    args_preview = json.dumps(args, ensure_ascii=False)[:1000]
+    if isinstance(result, (dict, list)):
+        # count-y summary to avoid dumping full payloads
+        if isinstance(result, list):
+            result_info = f"list(len={len(result)})"
+        else:
+            result_info = f"dict(keys={list(result.keys())[:6]})"
+    else:
+        result_info = str(result)
+    print(textwrap.dedent(f"""
+    🧰 Tool Step {step}
+    ├─ name: {name}
+    ├─ args: {args_preview}
+    └─ result: {result_info}
+    """).rstrip())
+
+def search_cases(query: str, space: str = "", filters: Dict[str, Any] = {}, top_k: int = 5) -> List[Dict[str, Any]]:
+    """ query OpenSearch and return compact hits (IDs + short snippets + meta)
+    """
+    # perform search; Filters will be implemented lateron (TODO)
+    hits = search_engine.search(query=query, top_k=top_k, space=space)
+
+    # hits has [{"id", "title", "score", "snippet", "download_url"}]
+    return hits
+
+def fetch_passages(query: str, ids: List[str], space: str = "", per_id: int = 3, max_tokens: int = 350) -> List[Dict[str, Any]]:
+    """Return top passages for selected hit IDs (ordered). """
+    passages = []
+
+    for id in ids:
+        top_passages_for_id = search_engine.fetch_passages(space=space,
+                                                            doc_id=id,
+                                                            query=query,
+                                                            per_id=per_id,
+                                                            max_tokens=max_tokens)
+        passages.extend(top_passages_for_id)
+    
+    return passages
+
+def fetch_document(id: str, space: str = "", max_tokens: int = 2048) -> Dict[str, Any]:
+    doc = search_engine.get_document_by_id(space=space, doc_id=id)
+    if doc is None:
+        print("[fetch_document] Document not found:", id)
+    elif doc.get("text") == "":
+        print("[fetch_document] Document has empty text:", id)
+    return doc if doc is not None else {}
+
+def clip(s, max_chars=16000):
+    return s if len(s)<=max_chars else s[:max_chars]
 
 def sse(event: str, data: Dict[str, Any]) -> str:
     return f"event: {event}\n" + f"data: {json.dumps(data, ensure_ascii=False)}\n\n"
@@ -203,7 +343,7 @@ async def chat_stream(request: Request, response: Response):
     # print(f"Built context with {used_docs} documents, {len(context_text)} characters")
 
     openai_messages = [
-        {"role": "system", "content": TEST_SYS_PROMPT},
+        {"role": "system", "content": "Your are a legal assistant for El Salvador. Answer concisely and cite with [doc_id]."},
         {"role": "user", "content": f"Pregunta: {msgs[-1]['content']}\n\nContexto:\n{context_text}\n\nInstrucciones: Responde conciso y cita con [doc_id]."},
     ]
 
@@ -234,3 +374,202 @@ async def chat_stream(request: Request, response: Response):
         # "Access-Control-Allow-Credentials": "true",
     }
     return StreamingResponse(gen(), media_type="text/event-stream", headers=headers)
+
+
+@router.post("/chat/agentic")
+# async def chat_stream(request: Request, response: Response, user=Depends(get_current_user)):
+async def chat_agentic(req: AgenticChatRequest):
+    # Parse inputs
+    space = req.space
+
+    # restore agent state if present
+    openai_messages: list[dict[str, Any]] = []
+    if req.state:
+        try:
+            s = json.loads(req.state)
+            if isinstance(s, list):
+                openai_messages = s
+        except Exception as e:
+            print("bad state:", e)
+        
+    last_user_msg = req.messages[-1]['content']
+
+    # append latest user message from your UI
+    openai_messages.append({"role":"user","content": last_user_msg})
+    
+    final_answer = ""
+    citations = []
+
+    keep_reasoning = True
+    max_iterations = 10
+    iteration_count = 0
+
+    trace = []
+    
+    def push_trace(evt):  # uniform schema for UI
+        # evt: {type, step, tool?, args?, message?, status?, result_count?}
+        trace.append(evt)
+
+    while keep_reasoning and iteration_count < max_iterations:
+        iteration_count += 1
+        print(f"\n🔄 **Reasoning Iteration {iteration_count}**")
+
+        extra_finalize_note = (
+            "You have reached the maximum reasoning iterations. "
+            "Do NOT call more tools. Produce the final answer now. If you still couldn't gather enough information, state that clearly in your answer. It is better to be honest than to invent information."
+        )
+        if iteration_count == max_iterations:
+            final_instructions = f"{SYSTEM_PROMPT_V1}\n\n[control] {extra_finalize_note}"
+        else:
+            final_instructions = SYSTEM_PROMPT_V1
+
+        response = client.responses.create(
+            model=settings.OPENAI_CHAT_MODEL,
+            instructions=final_instructions,
+            input=openai_messages,
+            tools=tools,
+            parallel_tool_calls=False,
+        )
+
+        raw_items = response.output    # SDK objects (ResponseOutputMessage, ResponseFunctionToolCall, ...)
+
+        openai_messages += sanitize_output_items(raw_items)
+
+        for item in raw_items:
+            print(f"Response type: {item.type}")
+            if item.type == "reasoning":
+                # Continue the loop to let the model decide next action
+                continue
+            if item.type == "function_call":
+                tool_name = item.name
+                
+                if tool_name == "emit_event":
+                    tool_args = json.loads(item.arguments)
+
+                    log_tool_call(iteration_count, tool_name, tool_args, "emitted")
+                    
+                    push_trace({
+                        "type": "reasoning",
+                        "step": iteration_count,
+                        "message": tool_args.get("message",""),
+                        "kind": tool_args.get("kind","note"),
+                    })
+
+                    # Ack back so the model knows we recorded it
+                    openai_messages.append({
+                        "type": "function_call_output",
+                        "call_id": item.call_id,
+                        "output": json.dumps({"ok": True})
+                    })
+                    continue
+                
+                elif tool_name == "search_cases":
+                    tool_args = json.loads(item.arguments)
+                    query = tool_args.get("query", last_user_msg)
+                    filters = tool_args.get("filters", {})
+                    top_k = int(tool_args.get("top_k", 5))
+
+                    push_trace({"type":"tool_start","step":iteration_count,"tool":"search_cases","args":{"query": query,"filters":filters,"top_k":top_k}})
+                    result = search_cases(query=query, space=space, filters=filters, top_k=top_k)
+                    push_trace({"type":"tool_result","step":iteration_count,"tool":"search_cases","result_count":len(result)})
+                    log_tool_call(iteration_count, tool_name, tool_args, result)
+
+                elif tool_name == "fetch_passages":
+                    tool_args = json.loads(item.arguments)
+                    ids = tool_args.get("ids", [])
+                    per_id = int(tool_args.get('per_id', 3))
+                    max_tokens = int(tool_args.get('max_tokens', 350))
+
+                    push_trace({"type":"tool_start","step":iteration_count,"tool":"fetch_passages","args":{"ids":ids,"per_id":per_id,"max_tokens":max_tokens}})
+                    result = fetch_passages(query=last_user_msg, ids=ids, space=space, per_id=per_id, max_tokens=max_tokens)
+                    push_trace({"type":"tool_result","step":iteration_count,"tool":"fetch_passages","result_count":len(result)})
+                    log_tool_call(iteration_count, tool_name, tool_args, result)
+                
+                elif tool_name == "fetch_document":                    
+                    tool_args = json.loads(item.arguments)
+                    doc_id = tool_args.get("id", "")
+                    max_tokens = int(tool_args.get("max_tokens", 2048))
+
+                    push_trace({"type":"tool_start","step":iteration_count,"tool":"fetch_document","args":{"id":doc_id,"max_tokens":max_tokens}})
+                    result = fetch_document(id=doc_id, space=space, max_tokens=max_tokens)
+                    push_trace({"type":"tool_result","step":iteration_count,"tool":"fetch_document","result_count":1 if result else 0})
+                    log_tool_call(iteration_count, tool_name, tool_args, result)
+                
+                # elif tool_name == "submit_answer":
+                #     tool_args = json.loads(item.arguments)
+                #     final_answer = tool_args.get("answer", "An internal error occurred.")
+                #     citations = tool_args.get("citations", [])
+                #     push_trace({"type":"final","step":iteration_count,"message":"answer submitted"})
+                    
+                #     # ACK the tool call so the model sees the call completed
+                #     openai_messages.append({
+                #         "type": "function_call_output",
+                #         "call_id": item.call_id,
+                #         "output": json.dumps({"received": True})
+                #     })
+
+                #     openai_messages.append({
+                #         "role": "assistant",
+                #         "content": final_answer
+                #     })
+
+                #     log_tool_call(iteration_count, tool_name, tool_args, final_answer)
+                #     keep_reasoning = False
+                #     break                    
+                
+                else:
+                    print(f"❌ **Unknown tool name: {tool_name}**")
+                    result = "Unknown tool"
+
+                # clip result to prevent context balooning (cost management)
+                result = clip(str(result))
+
+                # Append tool call and observation to messages for next iteration
+                openai_messages.append({
+                    "type": "function_call_output",
+                    "call_id": item.call_id,
+                    "output": str(result),
+                })
+            elif item.type == "message":
+                # If no tool call is triggered, print the response directly.
+                final_answer = response.output_text
+                print("💡 **Message from LLM:**")
+                print(final_answer)
+
+                openai_messages.append({
+                        "role": "assistant",
+                        "content": final_answer
+                    })
+                keep_reasoning = False
+                break
+            else:
+                print(f"❓ **Unknown response type: {item.type}**")
+    # # Good SSE headers (FastAPI sets content-type; add no-cache/keep-alive)
+    # headers = {
+    #     "Cache-Control": "no-cache",
+    #     "Connection": "keep-alive",
+    #     # If you use cookies across origins:
+    #     # "Access-Control-Allow-Credentials": "true",
+    # }
+
+    if final_answer == "":
+        final_answer = (
+        "No pude completar el razonamiento completo para contestar su pregunta. "
+        "¿Te parece bien que resuma los resultados encontrados hasta ahora?"
+        )
+
+    return {
+        "answer": final_answer,
+        "citations": dedupe_citations(citations),
+        "trace_len": len(openai_messages),
+        "trace": trace,
+        "agent_state": json.dumps(openai_messages)
+    }
+
+def dedupe_citations(cites: list[dict]) -> list[dict]:
+    seen = set(); out=[]
+    for c in cites:
+        did = c.get("doc_id")
+        if did and did not in seen:
+            out.append(c); seen.add(did)
+    return out
