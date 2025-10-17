@@ -8,7 +8,7 @@ export default function Navbar() {
   const initial = user?.first_name?.[0] || user?.email?.[0];
 
   return (
-    <nav className="shadow-md">
+    <nav className="sticky top-0 z-30 bg-white shadow-md">
       <div className="container mx-auto px-4 py-3 flex items-center justify-between">
         <Link to="/" className="flex items-center hover:opacity-80 transition scale-95">
           <img src={logo} alt="Encuentra logo" className="w-32" />

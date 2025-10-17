@@ -2,25 +2,16 @@ import { Routes, Route, Link } from "react-router-dom";
 import Navbar from './components/Navbar';
 import Landing from "./routes/Landing";
 import Search from "./routes/Search";
-import Chat from "./routes/Chat2";
+import Chat from "./routes/Chat4";
 import Uploads from "./routes/Uploads";
 import Login from "./routes/Login";
 // import bg from './assets/landing_bg.png';
 
 export default function App() {
   return (
-    <div
-      className="flex flex-col h-screen overflow-hidden"
-      style={{ backgroundColor: "#F5F5F7" }}  
-      // style={{
-      //     backgroundImage: `url(${bg})`,
-      //     backgroundSize: 'cover',
-      //     backgroundPosition: 'center',
-      //     backgroundRepeat: 'no-repeat',
-      //   }}  
-    >
+    <div className="flex flex-col min-h-screen">
       <Navbar />
-      <main className="flex flex-col flex-grow overflow-hidden min-h-0 mx-auto h-full w-full">
+      <main className="flex-1 min-h-0 w-full bg-[#F5F5F7]">
         <Routes>
           <Route path="/"      element={<Landing />} />
           <Route path="/search"  element={<Search />} />
@@ -29,9 +20,9 @@ export default function App() {
           <Route path="/login"   element={<Login />} />
         </Routes>
       </main>
-      <footer className="text-center py-1 text-xs text-gray-500 border-t">
+      {/* <footer className="text-center py-1 text-xs text-gray-500 border-t">
         © 2025 encuentra
-      </footer>
+      </footer> */}
     </div>
   );
 }
