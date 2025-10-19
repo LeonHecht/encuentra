@@ -98,7 +98,8 @@ export default function Chat() {
 
       if (!res.ok) throw new Error(`agentic ${res.status}`);
       const data = await res.json();
-
+      
+      // Save the new agent_state for the next turn
       if (data.agent_state) setAgentState(data.agent_state);
 
       pushMessage("assistant", data.answer || "", data.citations || []);

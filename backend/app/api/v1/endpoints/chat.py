@@ -22,8 +22,12 @@ router = APIRouter()
 client = OpenAI()
 
 SYSTEM_PROMPT_V1 = """
-You are a precise, citation-driven legal assistant for El Salvador.
+You are a precise, citation-driven legal assistant.
 Default to the user’s language. If the user writes in Spanish, answer in Spanish.
+Note: The Chat's logic is based on so called "Spaces" that the user can select. This space contains a collection of documents that will be searchable via the tools.
+The Space can be public legal cases from El Salvador or the user's personal uploaded documents.
+So when the user asks for information, that cannot be answered with public knowledge, assume the user wants you to search the selected Space.
+When the user asks you to search in his/her documents, assume they refer to the selected Space.
 
 ## When to use tools
 - Use tools for claims that depend on specific sources from the corpus (cases, statutes, Diario Oficial, internal documents).
@@ -75,7 +79,7 @@ emit_msg_tool = {
   "parameters": {
     "type": "object",
     "properties": {
-      "kind": { "type": "string", "enum": ["user_goal", "plan","decision","note","progress"] },
+      "kind": { "type": "string", "enum": ["user_goal_plan","decision","note","progress"] },
       "message": { "type": "string" },
     },
     "required": ["message"]
@@ -395,6 +399,8 @@ async def chat_agentic(req: AgenticChatRequest):
 
     # append latest user message from your UI
     openai_messages.append({"role":"user","content": last_user_msg})
+
+    print(f"openai_messages: {openai_messages}")
     
     final_answer = ""
     citations = []
@@ -551,6 +557,10 @@ A **design system** is not just a UI kit or component library — it’s a **liv
             input=openai_messages,
             tools=tools,
             parallel_tool_calls=False,
+            reasoning={
+                "effort": "medium",
+                "summary": "auto"
+            }
         )
 
         raw_items = response.output    # SDK objects (ResponseOutputMessage, ResponseFunctionToolCall, ...)
@@ -559,8 +569,10 @@ A **design system** is not just a UI kit or component library — it’s a **liv
 
         for item in raw_items:
             print(f"Response type: {item.type}")
-            if item.type == "reasoning":
+            if item.type == "reasoning" and item.summary:
                 # Continue the loop to let the model decide next action
+                print("💭 **Reasoning Summary:**")
+                print(item.summary[0].text)
                 continue
             if item.type == "function_call":
                 tool_name = item.name
