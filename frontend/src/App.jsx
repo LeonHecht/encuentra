@@ -4,7 +4,7 @@ import Landing from "./routes/Landing";
 import Search from "./routes/Search";
 import Chat from "./routes/Chat4";
 import Uploads from "./routes/Uploads";
-import Login from "./routes/Login";
+import AuthPage from "./routes/AuthPage";
 // import bg from './assets/landing_bg.png';
 
 export default function App() {
@@ -17,7 +17,7 @@ export default function App() {
           <Route path="/search"  element={<Search />} />
           <Route path="/chat"    element={<Chat />} />
           <Route path="/uploads" element={<Uploads />} />
-          <Route path="/login"   element={<Login />} />
+          <Route path="/login"   element={<AuthPage />} />
         </Routes>
       </main>
       {/* <footer className="text-center py-1 text-xs text-gray-500 border-t">

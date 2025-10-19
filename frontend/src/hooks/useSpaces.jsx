@@ -4,7 +4,8 @@ import { useAuth } from "@/context/AuthContext";
 import { formatSpaceLabel } from "@/utils/formatSpaceLabel";
 
 export function useSpaces() {
-  const { user } = useAuth();                    // email, organization, …
+  const { session } = useAuth();
+  const user = session?.user;                    // Supabase user object
   const [spaces, setSpaces] = useState([]);
   const [loading, setLoading] = useState(true);
 

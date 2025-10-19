@@ -38,4 +38,10 @@ class Settings(BaseSettings):
     MAX_DOC_TOKENS: int = 2000
     MAX_DOCS: int = 3
 
+    # --- Supabase ---
+    SUPABASE_URL: str | None = None
+    SUPABASE_KEY: str | None = None  # Service role key for backend (anon or service_role)
+    SUPABASE_JWKS_URL: str | None = None  # For verifying JWT tokens with new ECC keys
+    SUPABASE_JWT_SECRET: str | None = None  # Legacy HS256 shared secret
+
 settings = Settings()

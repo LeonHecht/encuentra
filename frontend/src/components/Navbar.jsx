@@ -3,9 +3,10 @@ import { useAuth } from '../context/AuthContext';
 import logo from '../assets/logo_full-removebg.png';
 
 export default function Navbar() {
-  const { user } = useAuth();
+  const { session } = useAuth();
+  const user = session?.user;
 
-  const initial = user?.first_name?.[0] || user?.email?.[0];
+  const initial = user?.user_metadata?.first_name?.[0] || user?.email?.[0];
 
   return (
     <nav className="sticky top-0 z-30 bg-white shadow-md">
