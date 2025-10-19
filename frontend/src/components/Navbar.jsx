@@ -6,7 +6,9 @@ export default function Navbar() {
   const { session } = useAuth();
   const user = session?.user;
 
-  const initial = user?.user_metadata?.first_name?.[0] || user?.email?.[0];
+  const fullName = user?.user_metadata?.full_name;
+  const firstName = user?.user_metadata?.first_name || fullName?.split(' ')[0];
+  const initial = firstName?.[0] || user?.email?.[0];
 
   return (
     <nav className="sticky top-0 z-30 bg-white shadow-md">
