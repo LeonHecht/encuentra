@@ -1,70 +1,55 @@
 from fastapi import APIRouter, Depends, HTTPException
 
 from backend.app.api.v1.schemas import (
-    LoginRequest,
-    LoginResponse,
     SpaceCreateRequest,
-    RegisterRequest,
     UserInfo,
 )
 from backend.app.dependencies import get_current_user
 from backend.app.services.auth import (
-    authenticate,
     create_user_space,
     get_accessible_spaces,
-    register_user,
-    user_exists,
-    get_user,
     UserData,
 )
 from backend.app.services.search import search_engine
 
 router = APIRouter()
 
-@router.post("/login", response_model=LoginResponse)
-def login(req: LoginRequest):
-    token = authenticate(req.username, req.password)
-    if not token:
-        raise HTTPException(401, detail="Invalid credentials")
-    user = get_user(req.username)
-    return LoginResponse(
-        token=token,
-        first_name=user.first_name if user else None,
-        last_name=user.last_name if user else None,
-    )
+# ============================================================================
+# DEPRECATED ENDPOINTS - Supabase handles authentication
+# ============================================================================
+# The following endpoints are no longer used with Supabase auth:
+# - POST /login -> Use Supabase Auth UI or supabase.auth.signInWithPassword()
+# - POST /register -> Use Supabase Auth UI or supabase.auth.signUp()
+# - GET /users/{username}/exists -> Use Supabase client methods
+#
+# These have been removed. Authentication is handled entirely by Supabase.
+# The frontend gets a JWT token from Supabase, which the backend verifies.
+# ============================================================================
 
 
-@router.get("/users/{username}/exists")
-def api_user_exists(username: str):
-    return {"exists": user_exists(username)}
+# ============================================================================
+# USER SPACE MANAGEMENT - Still active
+# ============================================================================
 
-
-@router.post("/register", response_model=LoginResponse)
-def register(req: RegisterRequest):
-    try:
-        register_user(
-            req.username,
-            req.password,
-            req.first_name,
-            req.last_name,
-        )
-    except ValueError as e:
-        raise HTTPException(400, detail=str(e))
-
-    token = authenticate(req.username, req.password)
-    user = get_user(req.username)
-    return LoginResponse(
-        token=token,
+@router.get("/user/info")
+def get_user_info(user: UserData = Depends(get_current_user)):
+    """Get current authenticated user information."""
+    return UserInfo(
+        username=user.username,
         first_name=user.first_name,
         last_name=user.last_name,
     )
 
+
 @router.get("/user/spaces")
 def list_user_spaces(user: UserData = Depends(get_current_user)):
+    """List all spaces accessible to the current user."""
     return {"spaces": get_accessible_spaces(user.username)}
+
 
 @router.post("/user/spaces")
 def create_space(req: SpaceCreateRequest, user: UserData = Depends(get_current_user)):
+    """Create a new space for the current user."""
     try:
         space_key = create_user_space(user.username, req.name)
     except ValueError as e:

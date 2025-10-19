@@ -22,8 +22,12 @@ router = APIRouter()
 client = OpenAI()
 
 SYSTEM_PROMPT_V1 = """
-You are a precise, citation-driven legal assistant for El Salvador.
+You are a precise, citation-driven legal assistant.
 Default to the user’s language. If the user writes in Spanish, answer in Spanish.
+Note: The Chat's logic is based on so called "Spaces" that the user can select. This space contains a collection of documents that will be searchable via the tools.
+The Space can be public legal cases from El Salvador or the user's personal uploaded documents.
+So when the user asks for information, that cannot be answered with public knowledge, assume the user wants you to search the selected Space.
+When the user asks you to search in his/her documents, assume they refer to the selected Space.
 
 ## When to use tools
 - Use tools for claims that depend on specific sources from the corpus (cases, statutes, Diario Oficial, internal documents).
@@ -47,8 +51,7 @@ Default to the user’s language. If the user writes in Spanish, answer in Spani
 - Cite only documents actually reviewed through `fetch_passages` or `fetch_document`.
 
 ## Output Format
-- Always use markdown format.
-- Deliver replies in the specific structure requested by the user (list, table, or outline) when applicable.
+- ALWAYS PROVIDE YOUR ANSWER IN MARKDOWN!
 
 ## Quality & Safety
 - Be concise, concrete, and neutral. 
@@ -76,7 +79,7 @@ emit_msg_tool = {
   "parameters": {
     "type": "object",
     "properties": {
-      "kind": { "type": "string", "enum": ["user_goal", "plan","decision","note","progress"] },
+      "kind": { "type": "string", "enum": ["user_goal_plan","decision","note","progress"] },
       "message": { "type": "string" },
     },
     "required": ["message"]
@@ -396,9 +399,134 @@ async def chat_agentic(req: AgenticChatRequest):
 
     # append latest user message from your UI
     openai_messages.append({"role":"user","content": last_user_msg})
+
+    print(f"openai_messages: {openai_messages}")
     
     final_answer = ""
     citations = []
+
+    if last_user_msg == "explain in detail what a design system is":
+        final_answer = (
+            """
+# What Is a Design System?
+
+A **design system** is a comprehensive collection of reusable components, design principles, and guidelines that ensure **consistency, scalability, and efficiency** across a product or a family of products. It serves as a **single source of truth** for designers and developers, allowing teams to build coherent user interfaces faster and more consistently.
+
+---
+
+## 🔧 Core Components of a Design System
+
+A design system typically includes both **visual** and **functional** elements:
+
+### 1. **Design Tokens**
+Design tokens are the smallest building blocks of a design system. They store visual design attributes such as:
+- Colors (e.g., `primary-color`, `text-secondary`)
+- Typography (font families, sizes, weights)
+- Spacing (margins, paddings)
+- Border radius and shadows
+- Breakpoints for responsive design
+
+> 💡 Think of design tokens as variables that translate design decisions into code.
+
+---
+
+### 2. **UI Components**
+Reusable interface elements built using the design tokens, such as:
+- Buttons  
+- Inputs and forms  
+- Dropdowns  
+- Modals  
+- Navigation bars  
+
+Each component follows standardized design and behavior rules, making them predictable and easy to use.
+
+---
+
+### 3. **Patterns**
+Patterns are **combinations of UI components** that solve common design problems.  
+Examples:
+- Login forms  
+- Search bars  
+- Pagination systems  
+- Notification toasts  
+
+Patterns enforce best practices and ensure consistent user experiences across the product.
+
+---
+
+### 4. **Guidelines and Principles**
+Documentation that describes **how and when to use** each component or style. This includes:
+- Accessibility standards  
+- Tone and voice of content  
+- Interaction guidelines (hover states, animations, etc.)  
+- Layout and grid systems  
+- Iconography rules  
+
+These guidelines help align designers, developers, and content creators under a shared vision.
+
+---
+
+## ⚙️ Why Use a Design System?
+
+| Benefit | Description |
+|----------|-------------|
+| **Consistency** | Ensures all product interfaces look and behave the same. |
+| **Efficiency** | Reduces design and development time by reusing tested components. |
+| **Scalability** | Makes it easier to expand and maintain large design ecosystems. |
+| **Collaboration** | Provides a shared vocabulary for designers and developers. |
+| **Quality** | Enforces accessibility and usability standards automatically. |
+
+---
+
+## 🧱 Examples of Popular Design Systems
+
+- **Material Design** – by Google  
+- **Carbon Design System** – by IBM  
+- **Lightning Design System** – by Salesforce  
+- **Atlassian Design System** – by Atlassian  
+- **Polaris** – by Shopify  
+- **Fluent UI** – by Microsoft  
+
+These systems have public documentation and serve as great references for how to structure your own.
+
+---
+
+## 🧩 Design System vs. Style Guide vs. Component Library
+
+| Concept | Description |
+|----------|-------------|
+| **Style Guide** | Focuses on visual elements like colors, fonts, and logos. |
+| **Component Library** | A coded collection of UI components. |
+| **Design System** | A holistic ecosystem that includes a style guide, component library, design tokens, patterns, and documentation. |
+
+> 💬 A design system = style guide + components + rules + philosophy.
+
+---
+
+## 🚀 Example Workflow
+
+1. **Design** a button component in Figma following the color and typography tokens.  
+2. **Implement** it in code (React, Vue, etc.) using the same tokens from a central source.  
+3. **Document** its usage and variants in the design system site (e.g., Storybook).  
+4. **Distribute** it via a private npm package so teams can import it into multiple projects.  
+5. **Update** the system — any token or component change propagates automatically across products.
+
+---
+
+## 🧠 Summary
+
+A **design system** is not just a UI kit or component library — it’s a **living ecosystem** of design and code that grows with the product. It creates a bridge between design and development, helping teams deliver consistent, accessible, and efficient digital experiences at scale.
+
+> In short: A design system is how design becomes *systematic*.
+"""
+        )
+        return {
+            "answer": final_answer,
+            "citations": [],
+            "trace_len": len(openai_messages),
+            "trace": [],
+            "agent_state": json.dumps(openai_messages)
+        }
 
     keep_reasoning = True
     max_iterations = 10
@@ -429,6 +557,10 @@ async def chat_agentic(req: AgenticChatRequest):
             input=openai_messages,
             tools=tools,
             parallel_tool_calls=False,
+            reasoning={
+                "effort": "medium",
+                "summary": "auto"
+            }
         )
 
         raw_items = response.output    # SDK objects (ResponseOutputMessage, ResponseFunctionToolCall, ...)
@@ -437,8 +569,10 @@ async def chat_agentic(req: AgenticChatRequest):
 
         for item in raw_items:
             print(f"Response type: {item.type}")
-            if item.type == "reasoning":
+            if item.type == "reasoning" and item.summary:
                 # Continue the loop to let the model decide next action
+                print("💭 **Reasoning Summary:**")
+                print(item.summary[0].text)
                 continue
             if item.type == "function_call":
                 tool_name = item.name

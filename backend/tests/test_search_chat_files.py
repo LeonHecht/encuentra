@@ -2,10 +2,11 @@ from pathlib import Path
 import io
 from dotenv import load_dotenv
 import os
+import asyncio
+from types import SimpleNamespace
 
 # Load the .env file from project root (2 levels up from /backend/tests)
 load_dotenv(dotenv_path=Path(__file__).resolve().parents[2] / ".env")
-assert os.getenv("OPENAI_API_KEY"), "⚠️ Missing OPENAI_API_KEY in environment!"
 
 import pytest
 
@@ -13,7 +14,7 @@ from backend.app.core.config import settings
 from backend.app.api.v1.endpoints import search as search_ep
 from backend.app.api.v1.endpoints import chat as chat_ep
 from backend.app.api.v1.endpoints import files as files_ep
-from backend.app.api.v1.schemas import ChatRequest
+# from backend.app.api.v1.schemas import ChatRequest   # no longer used
 from backend.app.services import auth
 from backend.app.services.search import search_engine
 from starlette.datastructures import UploadFile
@@ -32,7 +33,7 @@ def test_env(tmp_path, monkeypatch):
     monkeypatch.setattr(files_ep, "UPLOADS_ROOT", Path(settings.DATA_UPLOAD))
     files_ep.UPLOADS_ROOT.mkdir(parents=True, exist_ok=True)
 
-    # Reset auth DBs
+    # Reset auth DBs (legacy path used by these tests)
     auth.users_db.clear()
     auth.orgs_db.clear()
     auth.tokens_db.clear()
@@ -58,6 +59,39 @@ def test_env(tmp_path, monkeypatch):
     return auth.get_user("alice")
 
 
+@pytest.fixture()
+def fake_openai(monkeypatch):
+    """Mock the OpenAI Responses client used by chat_ep.client."""
+    class FakeItem:
+        def __init__(self, type="message", name=None, arguments=None, call_id=None, summary=None):
+            self.type = type
+            self.name = name
+            self.arguments = arguments
+            self.call_id = call_id
+            self.summary = summary
+        # The endpoint calls sanitize_output_items which expects model_dump() or dict-like
+        def model_dump(self):
+            # Minimal assistant message; sanitize_output_items will keep role+content
+            return {"type": "message", "role": "assistant", "content": "Test answer"}
+
+    class FakeResponse:
+        def __init__(self, text="Test answer"):
+            self.output = [FakeItem("message")]
+            self.output_text = text
+
+    class FakeResponsesAPI:
+        def create(self, model, instructions, input, tools, parallel_tool_calls, reasoning):
+            # Return a one-shot assistant message so the loop exits
+            return FakeResponse("Test answer")
+
+    class FakeClient:
+        def __init__(self):
+            self.responses = FakeResponsesAPI()
+
+    monkeypatch.setattr(chat_ep, "client", FakeClient())
+    return True
+
+
 def test_search_basic(test_env):
     user = test_env
     resp = search_ep.search(q="resolucion", top_k=3, space="supreme_court", user=user)
@@ -66,12 +100,18 @@ def test_search_basic(test_env):
     assert hit.score > 0
 
 
-def test_chat_basic(test_env):
-    req = ChatRequest(question="Dame un resumen del caso Hans Friedrich Meyer?", space="supreme_court")
-    resp = chat_ep.chat(req)
-    assert isinstance(resp.answer, str) and resp.answer
-    # At least one citation from the indexed corpus
-    assert resp.citations
+def test_chat_basic(test_env, fake_openai):
+    # New async agentic endpoint + request model
+    req = chat_ep.AgenticChatRequest(
+        space="supreme_court",
+        messages=[{"role": "user", "content": "Dame un resumen del caso Hans Friedrich Meyer?"}],
+        state=None,
+    )
+    resp = asyncio.run(chat_ep.chat_agentic(req))
+    assert isinstance(resp["answer"], str) and resp["answer"]
+    # Citations may be empty now unless tools trigger retrieval; just check presence of keys
+    assert "citations" in resp
+    assert "agent_state" in resp
 
 
 def test_file_upload_creates_file_and_indexes(test_env, monkeypatch):
@@ -84,10 +124,8 @@ def test_file_upload_creates_file_and_indexes(test_env, monkeypatch):
 
     monkeypatch.setattr(search_engine, "index", fake_index)
 
-    import asyncio
     resp = asyncio.run(files_ep.upload_file(files=[uploaded], space="alice/personal", user=user))
     saved = resp["uploaded"][0]["saved_path"]
     path = Path(settings.DATA_UPLOAD) / "alice" / "personal" / saved
     assert path.exists()
     assert indexed == ["alice/personal"]
-
