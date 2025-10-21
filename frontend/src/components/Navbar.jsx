@@ -1,18 +1,40 @@
 import { Link } from 'react-router-dom';
+import { useLayoutEffect, useRef } from 'react';
 import { useAuth } from '../context/AuthContext';
 import logo from '../assets/logo_full-removebg.png';
 
 export default function Navbar() {
   const { session } = useAuth();
   const user = session?.user;
+  const navRef = useRef(null);
 
   const fullName = user?.user_metadata?.full_name;
   const firstName = user?.user_metadata?.first_name || fullName?.split(' ')[0];
   const initial = firstName?.[0] || user?.email?.[0];
 
+  useLayoutEffect(() => {
+    const el = navRef.current;
+    if (!el) return;
+
+    const setVar = () => {
+      const h = el.offsetHeight || 64;
+      document.documentElement.style.setProperty("--navbar-h", `${h}px`);
+    };
+
+    setVar();
+    const ro = new ResizeObserver(setVar);
+    ro.observe(el);
+    window.addEventListener("resize", setVar);
+
+    return () => {
+      ro.disconnect();
+      window.removeEventListener("resize", setVar);
+    };
+  }, []);
+
   return (
-    <nav className="sticky top-0 z-30 bg-white shadow-md">
-      <div className="container mx-auto px-4 py-3 flex items-center justify-between">
+    <nav ref={navRef} className="bg-white shadow-md z-30 relative">
+      <div className="container mx-auto px-4 py-3 flex items-center justify-between max-w-full">
         <Link to="/" className="flex items-center hover:opacity-80 transition scale-95">
           <img src={logo} alt="Encuentra logo" className="w-32" />
         </Link>

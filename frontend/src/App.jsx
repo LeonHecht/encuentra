@@ -9,9 +9,9 @@ import AuthPage from "./routes/AuthPage";
 
 export default function App() {
   return (
-    <div className="flex flex-col min-h-screen">
+    <div className="flex flex-col h-dvh overflow-x-hidden">
       <Navbar />
-      <main className="flex-1 min-h-0 w-full bg-[#F5F5F7]">
+      <main className="flex flex-col flex-1 min-h-0 bg-[#F5F5F7]">
         <Routes>
           <Route path="/"      element={<Landing />} />
           <Route path="/search"  element={<Search />} />
