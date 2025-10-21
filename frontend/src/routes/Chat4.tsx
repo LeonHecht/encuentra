@@ -1,6 +1,10 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import SpaceSelect from "@/components/SpaceSelect";
+import ChatSidebar from "@/components/ChatSidebar2";
 import { useApi } from "@/hooks/useApi";
+import { supabase } from "@/lib/supabaseClient";
+import { SidebarProvider, SidebarTrigger, SidebarInset } from "@/components/ui/sidebar"
+import { Textarea } from "@/components/ui/textarea"
 
 // AI Elements
 import {
@@ -37,6 +41,7 @@ export default function Chat() {
   const [status, setStatus] = useState<"ready" | "submitted" | "streaming">(
     "ready"
   );
+  const [currentChatId, setCurrentChatId] = useState<string | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   const token = (() => {
@@ -74,9 +79,57 @@ export default function Chat() {
     ]);
   }
 
+  const loadChatMessages = useCallback(async (chatId: string) => {
+    const { data, error } = await supabase
+      .from("chat_messages")
+      .select("id, role, content, meta")
+      .eq("chat_id", chatId)
+      .order("created_at", { ascending: true });
+
+    if (!error && data) {
+      setMessages(
+        (data as any[]).map((m) => ({
+          id: m.id,
+          role: m.role,
+          text: m.content as string,
+          citations: m.meta?.citations || [],
+        }))
+      );
+    }
+  }, []);
+
+  async function ensureChat(title: string) {
+    if (currentChatId) return currentChatId;
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (!user) throw new Error("Necesitas iniciar sesión");
+
+    const { data, error } = await supabase
+      .from("chats")
+      .insert({ user_id: user.id, title })
+      .select()
+      .single();
+    if (error) throw error;
+
+    setCurrentChatId(data.id as string);
+    return data.id as string;
+  }
+
   async function handleSubmit() {
     const trimmed = text.trim();
     if (!trimmed || status !== "ready") return;
+
+    // Ensure we have a chat ID, creating one if needed
+    const chatId = await ensureChat(trimmed.slice(0, 60));
+
+    // Store user message
+    await supabase.from("chat_messages").insert({
+      chat_id: chatId,
+      role: "user",
+      content: trimmed,
+      meta: null,
+    });
 
     pushMessage("user", trimmed);
     setText("");
@@ -102,6 +155,14 @@ export default function Chat() {
       // Save the new agent_state for the next turn
       if (data.agent_state) setAgentState(data.agent_state);
 
+      // Store assistant message
+      await supabase.from("chat_messages").insert({
+        chat_id: chatId,
+        role: "assistant",
+        content: data.answer || "",
+        meta: { citations: data.citations || [] },
+      });
+
       pushMessage("assistant", data.answer || "", data.citations || []);
     } catch (err) {
       console.error("agentic error", err);
@@ -112,65 +173,91 @@ export default function Chat() {
   }
 
   return (
-    <div className="h-full w-full flex flex-col">
-      
-      {/* Space selector - sticky below navbar */}
-      <SpaceSelect
-        value={space}
-        onChange={(v) => setSpace(v)}
-        className="sticky top-16 z-20 p-3 my-3 mx-auto bg-[#F5F5F7] border border-transparent rounded-2xl hover:bg-gray-50 self-start w-fit flex-none"
+    <SidebarProvider className="min-h-0 h-full w-full overflow-hidden">
+      {/* Sidebar (fixed) + inset content. Using SidebarInset prevents double sidebar and handles the gap. */}
+      <ChatSidebar
+        className="shrink-0"
+        selectedId={currentChatId}
+        onSelect={(id) => {
+          setCurrentChatId(id);
+          loadChatMessages(id);
+        }}
+        onCreated={(id) => {
+          setCurrentChatId(id);
+          setMessages([]);
+        }}
       />
 
-      {/* Messages area - scrollable content */}
-      <div className="flex-1 min-h-0">
-        <div className="h-full overflow-y-auto">
-          <div className="mx-auto max-w-4xl px-3 pb-24 pt-4">
-            <Conversation>
-              <ConversationContent>
-                {messages.length === 0 ? (
-                  <div className="flex items-center justify-center min-h-[60vh]">
-                    <div className="text-center text-gray-600">
-                      <div className="text-2xl">Hola, ¿cómo puedo ayudarte hoy?</div>
-                    </div>
-                  </div>
-                ) : (
-                  messages.map((m) => (
-                    <Message key={m.id} from={m.role}>
-                      <MessageContent>
-                        <Response>{m.text}</Response>
-                      </MessageContent>
-                    </Message>
-                  ))
-                )}
-              </ConversationContent>
-              <ConversationScrollButton />
-            </Conversation>
+      {/* Main content inside the SidebarInset so it accounts for the sidebar gap */}
+      <SidebarInset className="flex flex-col flex-1 min-h-0 min-w-0 overflow-hidden bg-[#F5F5F7]">
+          {/* Sidebar toggle + Space selector (sticky below navbar) */}
+          <div className="flex items-center gap-2 p-2">
+            <SidebarTrigger />
+            <SpaceSelect
+              value={space}
+              onChange={(v) => setSpace(v)}
+              className="ml-1 p-3 bg-[#F5F5F7] border border-transparent rounded-2xl hover:bg-gray-50 w-fit"
+            />
           </div>
-        </div>
-      </div>
 
-      {/* Input fixed at bottom of screen */}
-      <div className="fixed bottom-0 left-0 right-0 bg-[#F5F5F7] pb-3">
-        <div className="mx-auto max-w-4xl px-3">
-          <PromptInput onSubmit={handleSubmit} className="bg-white shadow-lg rounded-2xl">
-            <PromptInputBody>
-              <PromptInputTextarea
-                ref={textareaRef}
-                value={text}
-                onChange={(e) => setText(e.target.value)}
-                placeholder="Pregunta lo que quieras a tu asistente legal…"
-              />
-            </PromptInputBody>
-            <PromptInputFooter>
-              <PromptInputTools />
-              <PromptInputSubmit
-                disabled={!text || status === 'submitted'}
-                status={status}
-              />
-            </PromptInputFooter>
-          </PromptInput>
-        </div>
-      </div>
-    </div>
+          {/* Messages area - scrollable content */}
+          <div className="flex flex-col flex-1 min-h-0 overflow-hidden">
+            <div
+              className={`flex-1 min-h-0 overflow-y-auto px-3 pt-2 ${
+                messages.length > 0 ? "pb-24" : "pb-6"
+              }`}
+            >
+              <div className="mx-auto w-full max-w-4xl">
+              <Conversation>
+                <ConversationContent>
+                  {messages.length === 0 ? (
+                    <div className="flex items-center justify-center min-h-[50vh]">
+                      <div className="text-center text-2xl text-gray-600">
+                        Hola, ¿cómo puedo ayudarte hoy?
+                      </div>
+                    </div>
+                  ) : (
+                    messages.map((m) => (
+                      <Message key={m.id} from={m.role}>
+                        <MessageContent>
+                          <Response>{m.text}</Response>
+                        </MessageContent>
+                      </Message>
+                    ))
+                  )}
+                </ConversationContent>
+                <ConversationScrollButton />
+              </Conversation>
+              </div>
+            </div>
+            {/* Input fixed at bottom of screen */}
+            {/* <Textarea className="bg-white w-full max-w-2xl mx-auto shrink-0" placeholder="Type your message here." /> */}
+            {/* <div className="fixed bottom-0 left-0 right-0 bg-[#F5F5F7] pb-3"> */}
+            <div className="mx-auto max-w-3xl w-full shrink-0 px-3 pb-3">
+              <PromptInput
+                onSubmit={handleSubmit}
+                className="bg-white shadow-lg rounded-2xl"
+              >
+                <PromptInputBody>
+                  <PromptInputTextarea
+                    ref={textareaRef}
+                    value={text}
+                    onChange={(e) => setText(e.target.value)}
+                    placeholder="Pregunta lo que quieras a tu asistente legal…"
+                  />
+                </PromptInputBody>
+                <PromptInputFooter>
+                  <PromptInputTools />
+                  <PromptInputSubmit
+                    disabled={!text || status === "submitted"}
+                    status={status}
+                  />
+                </PromptInputFooter>
+              </PromptInput>
+            </div>
+          </div>
+      </SidebarInset>
+      {/* </div> */}
+    </SidebarProvider>
   );
 }
