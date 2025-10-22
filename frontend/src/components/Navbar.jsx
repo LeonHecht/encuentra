@@ -39,21 +39,21 @@ export default function Navbar() {
           <img src={logo} alt="Encuentra logo" className="w-32" />
         </Link>
         <div className="space-x-4 flex items-center">
-          <Link to="/search" className="text-gray-600 hover:text-indigo-600">
+          <Link to="/search" className="text-gray-600 hover:text-gray-700">
             Buscar
           </Link>
-          <Link to="/chat" className="text-gray-600 hover:text-indigo-600">
+          <Link to="/chat" className="text-gray-600 hover:text-gray-700">
             Chat
           </Link>
-          <Link to="/uploads" className="text-gray-600 hover:text-indigo-600">
+          <Link to="/uploads" className="text-gray-600 hover:text-gray-700">
             Subir
           </Link>
           {user ? (
-            <div className="w-8 h-8 rounded-full bg-indigo-600 text-white flex items-center justify-center">
+            <div className="w-8 h-8 rounded-full bg-indigo-500 text-white flex items-center justify-center">
               {initial?.toUpperCase()}
             </div>
           ) : (
-            <Link to="/login" className="text-gray-600 hover:text-indigo-600">
+            <Link to="/login" className="text-gray-600 hover:text-gray-400">
               Login
             </Link>
           )}

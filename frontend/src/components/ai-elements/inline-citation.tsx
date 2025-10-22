@@ -50,35 +50,50 @@ export const InlineCitationText = ({
 export type InlineCitationCardProps = ComponentProps<typeof HoverCard>;
 
 export const InlineCitationCard = (props: InlineCitationCardProps) => (
-  <HoverCard closeDelay={0} openDelay={0} {...props} />
+  // Add a small open/close delay to prevent flicker when moving the cursor
+  // from the trigger to the card content across the tiny gap.
+  <HoverCard openDelay={20} closeDelay={80} {...props} />
 );
 
 export type InlineCitationCardTriggerProps = ComponentProps<typeof Badge> & {
-  sources: string[];
+  sources?: string[]; // optional URLs for hostname fallback
+  ids?: string[];     // optional doc ids to display like "DocID: 12345 +N"
+  label?: string;     // explicit label override
 };
 
 export const InlineCitationCardTrigger = ({
-  sources,
+  sources = [],
+  ids = [],
+  label,
   className,
   ...props
-}: InlineCitationCardTriggerProps) => (
-  <HoverCardTrigger asChild>
-    <Badge
-      className={cn("ml-1 rounded-full", className)}
-      variant="secondary"
-      {...props}
-    >
-      {sources.length ? (
-        <>
-          {new URL(sources[0]).hostname}{" "}
-          {sources.length > 1 && `+${sources.length - 1}`}
-        </>
-      ) : (
-        "unknown"
-      )}
-    </Badge>
-  </HoverCardTrigger>
-);
+}: InlineCitationCardTriggerProps) => {
+  let text: string = "unknown";
+  if (label && label.trim()) {
+    text = label.trim();
+  } else if (ids.length > 0) {
+    text = `DocID: ${ids[0]}${ids.length > 1 ? ` +${ids.length - 1}` : ""}`;
+  } else if (sources.length > 0) {
+    try {
+      const host = new URL(sources[0]).hostname;
+      text = `${host}${sources.length > 1 ? ` +${sources.length - 1}` : ""}`;
+    } catch {
+      text = sources[0];
+    }
+  }
+
+  return (
+    <HoverCardTrigger asChild>
+      <Badge
+        className={cn("ml-1 rounded-full", className)}
+        variant="secondary"
+        {...props}
+      >
+        {text}
+      </Badge>
+    </HoverCardTrigger>
+  );
+};
 
 export type InlineCitationCardBodyProps = ComponentProps<"div">;
 
@@ -86,7 +101,9 @@ export const InlineCitationCardBody = ({
   className,
   ...props
 }: InlineCitationCardBodyProps) => (
-  <HoverCardContent className={cn("relative w-80 p-0", className)} {...props} />
+  // Reduce default side offset so the card sits closer to the trigger,
+  // making it easier to cross the gap without closing.
+  <HoverCardContent sideOffset={4} className={cn("relative w-80 p-0", className)} {...props} />
 );
 
 const CarouselApiContext = createContext<CarouselApi | undefined>(undefined);

@@ -82,7 +82,8 @@ export default function Search() {
         <SpaceSelect
           value={space}
           onChange={(v) => setSpace(v)}
-          className="p-3 bg-transparent transition border border-transparent rounded-2xl hover:border-inherit hover:bg-gray-50 hover:cursor-pointer focus:outline-none"
+            className="focus:outline-none" 
+          // className="h-11 px-4 bg-transparent transition rounded-2xl hover:bg-gray-50 hover:cursor-pointer focus:outline-none ring-0 focus-visible:ring-0 [aria-expanded=true]:ring-0 border border-transparent hover:border-inherit"
         />
         <div className={`input-wrapper flex-grow relative ${q ? 'caret-hidden' : ''}`}>
           <input

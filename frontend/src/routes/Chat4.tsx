@@ -1,10 +1,9 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import SpaceSelect from "@/components/SpaceSelect";
-import ChatSidebar from "@/components/ChatSidebar2";
+import ChatSidebar from "@/components/ChatSidebar";
 import { useApi } from "@/hooks/useApi";
 import { supabase } from "@/lib/supabaseClient";
 import { SidebarProvider, SidebarTrigger, SidebarInset } from "@/components/ui/sidebar"
-import { Textarea } from "@/components/ui/textarea"
 
 // AI Elements
 import {
@@ -14,6 +13,23 @@ import {
 } from "@/components/ai-elements/conversation";
 import { Message, MessageContent } from "@/components/ai-elements/message";
 import { Response } from "@/components/ai-elements/response";
+import MarkdownWithCitations from "@/components/MarkdownWithCitations";
+import {
+  InlineCitation,
+  InlineCitationText,
+  InlineCitationCard,
+  InlineCitationCardTrigger,
+  InlineCitationCardBody,
+  InlineCitationCarousel,
+  InlineCitationCarouselHeader,
+  InlineCitationCarouselIndex,
+  InlineCitationCarouselPrev,
+  InlineCitationCarouselNext,
+  InlineCitationCarouselContent,
+  InlineCitationCarouselItem,
+  InlineCitationSource,
+  InlineCitationQuote,
+} from "@/components/ai-elements/inline-citation";
 import {
   PromptInput,
   PromptInputBody,
@@ -71,7 +87,7 @@ export default function Chat() {
   function pushMessage(
     role: "user" | "assistant",
     text: string,
-    citations?: ChatMsg["citations"]
+    citations: ChatMsg["citations"] = []
   ) {
     setMessages((prev) => [
       ...prev,
@@ -97,6 +113,28 @@ export default function Chat() {
       );
     }
   }, []);
+  const loadChatAgentState = useCallback(async (chatId: string) => {
+    const { data, error } = await supabase
+      .from("chats")
+      .select("agent_state")
+      .eq("id", chatId)
+      .single();
+
+    if (!error && data) {
+      const st = (data as any).agent_state;
+      if (st == null) {
+        setAgentState(null);
+      } else if (typeof st === "string") {
+        setAgentState(st);
+      } else {
+        try {
+          setAgentState(JSON.stringify(st));
+        } catch {
+          setAgentState(null);
+        }
+      }
+    }
+  }, []);
 
   async function ensureChat(title: string) {
     if (currentChatId) return currentChatId;
@@ -117,25 +155,29 @@ export default function Chat() {
   }
 
   async function handleSubmit() {
+    console.log("agent state:", agentState);
+    
     const trimmed = text.trim();
     if (!trimmed || status !== "ready") return;
 
-    // Ensure we have a chat ID, creating one if needed
-    const chatId = await ensureChat(trimmed.slice(0, 60));
-
-    // Store user message
-    await supabase.from("chat_messages").insert({
-      chat_id: chatId,
-      role: "user",
-      content: trimmed,
-      meta: null,
-    });
-
-    pushMessage("user", trimmed);
-    setText("");
     setStatus("submitted");
-
     try {
+      // Ensure we have a chat ID, creating one if needed
+      const chatId = await ensureChat(trimmed.slice(0, 60));
+
+      // Store user message (and also update local UI immediately)
+      pushMessage("user", trimmed);
+      setText("");
+      const { error: insertUserErr } = await supabase.from("chat_messages").insert({
+        chat_id: chatId,
+        role: "user",
+        content: trimmed,
+        meta: null,
+      });
+      if (insertUserErr) {
+        console.error("Failed to persist user message:", insertUserErr);
+      }
+
       const res = await fetch(`${API_BASE}/v1/chat/agentic`, {
         method: "POST",
         headers: {
@@ -152,20 +194,36 @@ export default function Chat() {
       if (!res.ok) throw new Error(`agentic ${res.status}`);
       const data = await res.json();
       
-      // Save the new agent_state for the next turn
-      if (data.agent_state) setAgentState(data.agent_state);
+      // Save the new agent_state for the next turn and persist it with the chat
+      if (data.agent_state) {
+        setAgentState(data.agent_state);
+        try {
+          await supabase
+            .from("chats")
+            .update({ agent_state: data.agent_state })
+            .eq("id", chatId);
+        } catch (e) {
+          console.error("Failed to persist agent_state:", e);
+        }
+      }
 
       // Store assistant message
-      await supabase.from("chat_messages").insert({
+      const { error: insertAssistantErr } = await supabase.from("chat_messages").insert({
         chat_id: chatId,
         role: "assistant",
         content: data.answer || "",
         meta: { citations: data.citations || [] },
       });
+      if (insertAssistantErr) {
+        console.error("Failed to persist assistant message:", insertAssistantErr);
+      }
+
+      console.log("===Citations===");
+      console.log(data.citations);
 
       pushMessage("assistant", data.answer || "", data.citations || []);
     } catch (err) {
-      console.error("agentic error", err);
+      console.error("agentic submit error", err);
       pushMessage("assistant", "Ocurrió un error procesando tu consulta.");
     } finally {
       setStatus("ready");
@@ -181,10 +239,12 @@ export default function Chat() {
         onSelect={(id) => {
           setCurrentChatId(id);
           loadChatMessages(id);
+          loadChatAgentState(id);
         }}
         onCreated={(id) => {
           setCurrentChatId(id);
           setMessages([]);
+          setAgentState(null);
         }}
       />
 
@@ -196,7 +256,7 @@ export default function Chat() {
             <SpaceSelect
               value={space}
               onChange={(v) => setSpace(v)}
-              className="ml-1 p-3 bg-[#F5F5F7] border border-transparent rounded-2xl hover:bg-gray-50 w-fit"
+              className="ml-1"
             />
           </div>
 
@@ -220,7 +280,16 @@ export default function Chat() {
                     messages.map((m) => (
                       <Message key={m.id} from={m.role}>
                         <MessageContent>
-                          <Response>{m.text}</Response>
+                          {m.role === "assistant" ? (
+                            <MarkdownWithCitations
+                              className="prose prose-slate max-w-none"
+                              text={m.text}
+                              citations={m.citations || []}
+                              apiBase={API_BASE}
+                            />
+                          ) : (
+                            <Response>{m.text}</Response>
+                          )}
                         </MessageContent>
                       </Message>
                     ))
@@ -236,7 +305,7 @@ export default function Chat() {
             <div className="mx-auto max-w-3xl w-full shrink-0 px-3 pb-3">
               <PromptInput
                 onSubmit={handleSubmit}
-                className="bg-white shadow-lg rounded-2xl"
+                className="bg-white rounded-2xl shadow-lg transition-colors hover:bg-gray-50"
               >
                 <PromptInputBody>
                   <PromptInputTextarea
