@@ -3,7 +3,7 @@ from fastapi.responses import StreamingResponse
 from typing import List, Dict, Any
 from pydantic import BaseModel
 from typing import Any
-
+import re
 import json
 import textwrap
 from openai import OpenAI
@@ -47,7 +47,7 @@ When the user asks you to search in his/her documents, assume they refer to the 
 - If at any point you need clarification or a selection from the user, respond with a clear prompt, so after getting back the clarification from the user, you can proceed with the reasoning. But try to assume the most likely intent of the user and avoid asking for clarifications unless absolutely necessary.
 
 ## Citations
-- Include bracketed citations: [DocID §short-hint] after any factual assertion based on a specific document.
+- Include bracketed citations: [DocID §citation] after any factual assertion based on a specific document. The citation you include can be 1-3 sentences or shorter, depending on the situation.
 - Cite only documents actually reviewed through `fetch_passages` or `fetch_document`.
 
 ## Output Format
@@ -616,6 +616,14 @@ A **design system** is not just a UI kit or component library — it’s a **liv
 
                     push_trace({"type":"tool_start","step":iteration_count,"tool":"fetch_passages","args":{"ids":ids,"per_id":per_id,"max_tokens":max_tokens}})
                     result = fetch_passages(query=last_user_msg, ids=ids, space=space, per_id=per_id, max_tokens=max_tokens)
+                    try:
+                        for p in result or []:
+                            did = (p or {}).get("doc_id") or (p or {}).get("id")
+                            if did:
+                                snip = (p or {}).get("passage") or (p or {}).get("snippet") or ""
+                                citations.append({"doc_id": did, "snippet": snip[:400]})
+                    except Exception as _e:
+                        pass
                     push_trace({"type":"tool_result","step":iteration_count,"tool":"fetch_passages","result_count":len(result)})
                     log_tool_call(iteration_count, tool_name, tool_args, result)
                 
@@ -626,6 +634,14 @@ A **design system** is not just a UI kit or component library — it’s a **liv
 
                     push_trace({"type":"tool_start","step":iteration_count,"tool":"fetch_document","args":{"id":doc_id,"max_tokens":max_tokens}})
                     result = fetch_document(id=doc_id, space=space, max_tokens=max_tokens)
+                    try:
+                        if isinstance(result, dict):
+                            did = result.get("id") or doc_id
+                            txt = (result.get("text") or "")
+                            if did and txt:
+                                citations.append({"doc_id": did, "snippet": txt[:240]})
+                    except Exception as _e:
+                        pass
                     push_trace({"type":"tool_result","step":iteration_count,"tool":"fetch_document","result_count":1 if result else 0})
                     log_tool_call(iteration_count, tool_name, tool_args, result)
                 
@@ -692,9 +708,31 @@ A **design system** is not just a UI kit or component library — it’s a **liv
         "¿Te parece bien que resuma los resultados encontrados hasta ahora?"
         )
 
+        # Parse inline [DocID §citation] markers from the final answer so the UI can place citations exactly inline.
+    def extract_inline_citations(text: str):
+        # Matches [DocID] or [DocID §hint]; DocID excludes closing bracket and whitespace
+        # Examples: [38949], [38949 §sentencia condenatoria]
+        pattern = re.compile(r"\[([^\]\s]+)(?:\s*§\s*([^\]]+))?\]")
+        occ = []
+        for m in pattern.finditer(text or ""):
+            doc_id = (m.group(1) or "").strip()
+            cite = (m.group(2) or "").strip() if m.lastindex and m.group(2) else ""
+            occ.append({
+                "doc_id": doc_id,
+                "cite": cite,
+                "start": m.start(),
+                "end": m.end(),
+            })
+        return occ
+
+    inline_occurrences = extract_inline_citations(final_answer)
+    print("=== Inline Citations===")
+    print(inline_occurrences)
+
     return {
         "answer": final_answer,
         "citations": dedupe_citations(citations),
+        "inline_citations": inline_occurrences,
         "trace_len": len(openai_messages),
         "trace": trace,
         "agent_state": json.dumps(openai_messages)
