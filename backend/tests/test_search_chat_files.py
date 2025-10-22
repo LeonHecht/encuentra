@@ -20,10 +20,7 @@ from backend.app.services.search import search_engine
 from starlette.datastructures import UploadFile
 
 
-pytestmark = pytest.mark.skipif(
-    settings.SEARCH_BACKEND != "bm25",
-    reason="Tests exercise the in-memory BM25 backend",
-)
+# These tests now target the OpenSearch backend (default in settings).
 
 
 @pytest.fixture()
@@ -33,21 +30,19 @@ def test_env(tmp_path, monkeypatch):
     monkeypatch.setattr(files_ep, "UPLOADS_ROOT", Path(settings.DATA_UPLOAD))
     files_ep.UPLOADS_ROOT.mkdir(parents=True, exist_ok=True)
 
-    # Reset auth DBs (legacy path used by these tests)
-    auth.users_db.clear()
-    auth.orgs_db.clear()
-    auth.tokens_db.clear()
-    auth.init_data()
+    # Reset auth DBs (legacy path used by these tests). Be robust to attribute changes.
+    for name in ("users_db", "orgs_db", "tokens_db", "sessions_db"):
+        store = getattr(auth, name, None)
+        if hasattr(store, "clear"):
+            store.clear()
+    if hasattr(auth, "init_data"):
+        auth.init_data()
     user = auth.get_user("alice")
     user.spaces.append("supreme_court")
     monkeypatch.setattr(search_ep, "get_accessible_spaces", lambda u: ["supreme_court", "alice/personal"])
 
-    # Reset BM25 engine
-    search_engine.corpus.clear()
-    search_engine.tokenized.clear()
-    search_engine.bm25_models.clear()
-
     # Index the built-in supreme court corpus and a simple personal document
+    # For OpenSearch backend, this will create/refresh the alias for the space.
     search_engine.index("supreme_court")
 
     # Create a simple document in alice's personal space

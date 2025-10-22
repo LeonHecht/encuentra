@@ -1,10 +1,9 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import SpaceSelect from "@/components/SpaceSelect";
-import ChatSidebar from "@/components/ChatSidebar2";
+import ChatSidebar from "@/components/ChatSidebar";
 import { useApi } from "@/hooks/useApi";
 import { supabase } from "@/lib/supabaseClient";
 import { SidebarProvider, SidebarTrigger, SidebarInset } from "@/components/ui/sidebar"
-import { Textarea } from "@/components/ui/textarea"
 
 // AI Elements
 import {
@@ -114,6 +113,28 @@ export default function Chat() {
       );
     }
   }, []);
+  const loadChatAgentState = useCallback(async (chatId: string) => {
+    const { data, error } = await supabase
+      .from("chats")
+      .select("agent_state")
+      .eq("id", chatId)
+      .single();
+
+    if (!error && data) {
+      const st = (data as any).agent_state;
+      if (st == null) {
+        setAgentState(null);
+      } else if (typeof st === "string") {
+        setAgentState(st);
+      } else {
+        try {
+          setAgentState(JSON.stringify(st));
+        } catch {
+          setAgentState(null);
+        }
+      }
+    }
+  }, []);
 
   async function ensureChat(title: string) {
     if (currentChatId) return currentChatId;
@@ -134,6 +155,8 @@ export default function Chat() {
   }
 
   async function handleSubmit() {
+    console.log("agent state:", agentState);
+    
     const trimmed = text.trim();
     if (!trimmed || status !== "ready") return;
 
@@ -171,8 +194,18 @@ export default function Chat() {
       if (!res.ok) throw new Error(`agentic ${res.status}`);
       const data = await res.json();
       
-      // Save the new agent_state for the next turn
-      if (data.agent_state) setAgentState(data.agent_state);
+      // Save the new agent_state for the next turn and persist it with the chat
+      if (data.agent_state) {
+        setAgentState(data.agent_state);
+        try {
+          await supabase
+            .from("chats")
+            .update({ agent_state: data.agent_state })
+            .eq("id", chatId);
+        } catch (e) {
+          console.error("Failed to persist agent_state:", e);
+        }
+      }
 
       // Store assistant message
       const { error: insertAssistantErr } = await supabase.from("chat_messages").insert({
@@ -206,10 +239,12 @@ export default function Chat() {
         onSelect={(id) => {
           setCurrentChatId(id);
           loadChatMessages(id);
+          loadChatAgentState(id);
         }}
         onCreated={(id) => {
           setCurrentChatId(id);
           setMessages([]);
+          setAgentState(null);
         }}
       />
 

@@ -265,9 +265,10 @@ class OpenSearchSearch:
         print(f"[OpenSearch] Indexed {len(documents)} docs into alias '{alias}' via '{build_name}'.")
 
     def has_space(self, space: str) -> bool:
+        """Return True if the logical space exists (via alias)."""
         client = self._get_client()
-        index_name = self._index_name(space)
-        return bool(client.indices.exists(index=index_name))
+        alias = self._alias_name(space)
+        return bool(client.indices.exists_alias(name=alias))
 
     def search(self, query: str, top_k: int = 30, space: str = "supreme_court") -> list[dict[str, Any]]:
         client = self._get_client()

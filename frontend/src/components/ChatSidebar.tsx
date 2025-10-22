@@ -1,18 +1,24 @@
 import { useEffect, useState, useCallback } from "react";
-import { Button } from "@/components/ui/button";
-import { ScrollArea } from "@/components/ui/scroll-area";
-import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from "@/components/ui/collapsible";
-import { cn } from "@/lib/utils";
 import { supabase } from "@/lib/supabaseClient";
+import { Button } from "@/components/ui/button";
+
+import {
+  Sidebar,
+  SidebarContent,
+  SidebarGroup,
+  SidebarGroupContent,
+  SidebarGroupLabel,
+  SidebarHeader,
+  SidebarMenu,
+  SidebarMenuButton,
+  SidebarMenuItem,
+} from "@/components/ui/sidebar"
 
 type Chat = {
   id: string;
   title: string | null;
   created_at: string;
+  updated_at?: string;
 };
 
 export type ChatSidebarProps = {
@@ -28,7 +34,6 @@ export default function ChatSidebar({
   onCreated,
   className,
 }: ChatSidebarProps) {
-  const [open, setOpen] = useState(true);
   const [chats, setChats] = useState<Chat[]>([]);
   const [loading, setLoading] = useState(false);
 
@@ -36,7 +41,8 @@ export default function ChatSidebar({
     setLoading(true);
     const { data, error } = await supabase
       .from("chats")
-      .select("id,title,created_at")
+      .select("id,title,created_at,updated_at")
+      .order("updated_at", { ascending: false })
       .order("created_at", { ascending: false });
     if (!error && data) setChats(data as Chat[]);
     setLoading(false);
@@ -69,61 +75,51 @@ export default function ChatSidebar({
   }, [onCreated, onSelect]);
 
   return (
-    <div
-      className={cn(
-        "flex h-full w-72 flex-col border-r bg-white",
-        className
-      )}
+    <Sidebar
+      className={className}
+      // Use CSS var with fallback, so it adapts to navbar height dynamically
+      style={{
+        top: "var(--navbar-h, 4rem)",
+        height: "calc(100vh - var(--navbar-h, 4rem))",
+      }}
     >
-      <Collapsible open={open} onOpenChange={setOpen} className="flex flex-col">
-        <div className="flex items-center justify-between border-b p-3">
-          <CollapsibleTrigger asChild>
-            <Button variant="ghost" className="px-2 font-semibold">
-              Chats
-            </Button>
-          </CollapsibleTrigger>
+      {/* Keep header sticky so actions stay visible while scrolling */}
+      <SidebarHeader className="sticky top-0 z-10 border-b bg-background/80 backdrop-blur">
+        <div className="flex items-center justify-between px-3 py-2">
+          <span className="font-semibold">Chats</span>
           <div className="flex items-center gap-2">
-            <Button
-              size="sm"
-              onClick={fetchChats}
-              variant="ghost"
-              disabled={loading}
-            >
-              {loading ? "…" : "↻"}
-            </Button>
-            <Button size="sm" onClick={createChat}>
+            {/* Removed reload button as requested */}
+            <Button size="sm" onClick={createChat} disabled={loading}>
               + Nuevo
             </Button>
           </div>
         </div>
+      </SidebarHeader>
 
-        <CollapsibleContent className="flex-1 overflow-hidden">
-          <ScrollArea className="h-[calc(100vh-8rem)] px-2 pb-2">
-            <div className="flex flex-col gap-1 pr-2 pt-2">
+      <SidebarContent>
+        <SidebarGroup>
+          <SidebarGroupLabel>Historial de Chats</SidebarGroupLabel>
+          <SidebarGroupContent>
+            <SidebarMenu>
               {chats.map((c) => (
-                <Button
-                  key={c.id}
-                  variant="ghost"
-                  className={cn(
-                    "w-full justify-start rounded-lg px-3 text-left",
-                    selectedId === c.id && "bg-accent"
-                  )}
-                  onClick={() => onSelect(c.id)}
-                >
-                  <span className="truncate">
-                    {c.title || "Sin título"}
-                  </span>
-                </Button>
+                <SidebarMenuItem key={c.id}>
+                  <SidebarMenuButton
+                    isActive={selectedId === c.id}
+                    onClick={() => onSelect(c.id)}
+                  >
+                    <span className="truncate">{c.title || "Sin título"}</span>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
               ))}
               {chats.length === 0 && !loading && (
                 <div className="px-3 py-2 text-sm text-muted-foreground">
                   No hay chats todavía.
                 </div>
               )}
-            </div>
-          </ScrollArea>
-        </CollapsibleContent>
-      </Collapsible>
-    </div>
+            </SidebarMenu>
+          </SidebarGroupContent>
+        </SidebarGroup>
+      </SidebarContent>
+    </Sidebar>
   );
 }
