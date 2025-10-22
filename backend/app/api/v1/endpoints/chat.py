@@ -48,6 +48,7 @@ When the user asks you to search in his/her documents, assume they refer to the 
 
 ## Citations
 - Include bracketed citations: [DocID §citation] after any factual assertion based on a specific document. The citation you include can be 1-3 sentences or shorter, depending on the situation.
+- If multiple documents support the same claim, GROUP them in a single bracket like: [38949; 38950] or [38949 §nota; 38950]. Do not emit adjacent brackets like [38949] [38950].
 - Cite only documents actually reviewed through `fetch_passages` or `fetch_document`.
 
 ## Output Format

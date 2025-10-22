@@ -71,9 +71,23 @@ function embedCitationSpans(md: string): string {
   });
 }
 
+// Normalize adjacent bracketed citations like "[40793] [100399]" into a single group
+// "[40793; 100399]" so they render as one carousel.
+function mergeAdjacentBracketCitations(md: string): string {
+  let prev: string;
+  let cur = md;
+  const rx = /\[([^\]]+)\](\s*)\[([^\]]+)\]/g;
+  // Repeat until no more merges can be made (handles 3+ in a row)
+  do {
+    prev = cur;
+    cur = cur.replace(rx, (_m, a, ws, b) => `[${a}; ${b}]`);
+  } while (cur !== prev);
+  return cur;
+}
+
 export default function MarkdownWithCitations({ text, citations = [], apiBase, className }: Props) {
   // Preprocess markdown to include <cite ...> markers that we map to InlineCitation components
-  const withCites = React.useMemo(() => embedCitationSpans(text || ""), [text]);
+  const withCites = React.useMemo(() => embedCitationSpans(mergeAdjacentBracketCitations(text || "")), [text]);
 
   const CiteRenderer = ({ node, children }: any) => {
     const props = (node && (node.properties as any)) || {};
