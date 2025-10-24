@@ -52,6 +52,97 @@ export default function ChatSidebar({
     fetchChats();
   }, [fetchChats]);
 
+  // Listen for local UI events to keep list in sync without a full reload
+  useEffect(() => {
+    const handleChatUpdated = (e: Event) => {
+      const evt = e as CustomEvent<{ id: string; title?: string }>; 
+      const { id, title } = evt.detail || ({} as any);
+      if (!id) return;
+      setChats((prev) =>
+        prev.map((c) => (c.id === id ? { ...c, title: title ?? c.title } : c))
+      );
+    };
+
+    const handleChatCreated = (e: Event) => {
+      const evt = e as CustomEvent<{ chat: Chat }>; 
+      const chat = evt.detail?.chat;
+      if (!chat) return;
+      setChats((prev) => {
+        if (prev.some((c) => c.id === chat.id)) return prev;
+        return [chat, ...prev];
+      });
+    };
+
+    window.addEventListener("chat:updated", handleChatUpdated as EventListener);
+    window.addEventListener("chat:created", handleChatCreated as EventListener);
+    return () => {
+      window.removeEventListener(
+        "chat:updated",
+        handleChatUpdated as EventListener
+      );
+      window.removeEventListener(
+        "chat:created",
+        handleChatCreated as EventListener
+      );
+    };
+  }, []);
+
+  // Optional: subscribe to Supabase Realtime so updates from other tabs/processes also reflect instantly
+  useEffect(() => {
+    let channel: any;
+    (async () => {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      if (!user) return;
+      channel = supabase
+        .channel("realtime:chats")
+        .on(
+          "postgres_changes",
+          { event: "INSERT", schema: "public", table: "chats", filter: `user_id=eq.${user.id}` },
+          (payload) => {
+            const chat = payload.new as Chat;
+            setChats((prev) => {
+              if (prev.some((c) => c.id === chat.id)) return prev;
+              return [chat, ...prev];
+            });
+          }
+        )
+        .on(
+          "postgres_changes",
+          { event: "UPDATE", schema: "public", table: "chats", filter: `user_id=eq.${user.id}` },
+          (payload) => {
+            const chat = payload.new as Chat;
+            setChats((prev) =>
+              prev.map((c) =>
+                c.id === chat.id
+                  ? { ...c, title: chat.title, updated_at: chat.updated_at }
+                  : c
+              )
+            );
+          }
+        )
+        .on(
+          "postgres_changes",
+          { event: "DELETE", schema: "public", table: "chats", filter: `user_id=eq.${user.id}` },
+          (payload) => {
+            const oldId = (payload.old as any)?.id as string | undefined;
+            if (!oldId) return;
+            setChats((prev) => prev.filter((c) => c.id !== oldId));
+          }
+        )
+        .subscribe();
+    })();
+
+    return () => {
+      if (channel) {
+        try {
+          supabase.removeChannel(channel);
+        } catch {}
+      }
+    };
+  }, []);
+
   const createChat = useCallback(async () => {
     const {
       data: { user },

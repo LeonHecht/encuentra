@@ -78,7 +78,7 @@ export default function Uploads() {
                             if (v === "__new__") setCreating(true);
                             else { setCreating(false); setSpace(v); }
                           }}
-                          className="p-3 bg-transparent transition border border-transparent rounded-2xl hover:border-inherit hover:bg-gray-50 hover:cursor-pointer focus:outline-none"
+                          className="px-3 py-5 bg-transparent transition border border-transparent rounded-2xl hover:border-inherit hover:bg-gray-50 hover:cursor-pointer focus:outline-none"
                         />
 
                         {creating && (

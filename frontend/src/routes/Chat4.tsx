@@ -49,6 +49,7 @@ type ChatMsg = {
 export default function Chat() {
   const API_BASE = import.meta.env.VITE_API_BASE || "http://localhost:8000";
 
+  const [title, setTitle] = useState<string>("");
   const [messages, setMessages] = useState<ChatMsg[]>([]);
   const [spaces, setSpaces] = useState<string[]>([]);
   const [space, setSpace] = useState<string>("");
@@ -151,6 +152,14 @@ export default function Chat() {
     if (error) throw error;
 
     setCurrentChatId(data.id as string);
+    // Notify sidebar immediately about the newly created chat so it appears without reload
+    try {
+      window.dispatchEvent(
+        new CustomEvent("chat:created", { detail: { chat: data } })
+      );
+    } catch (e) {
+      // no-op: event dispatch is best-effort
+    }
     return data.id as string;
   }
 
@@ -193,7 +202,30 @@ export default function Chat() {
 
       if (!res.ok) throw new Error(`agentic ${res.status}`);
       const data = await res.json();
-      
+
+      // Set title for Chat returned by LLM
+      if (data.title) {
+        setTitle(data.title);
+        try {
+          await supabase
+            .from("chats")
+            .update({ title: data.title })
+            .eq("id", chatId);
+          // Notify listeners (e.g., sidebar) to update the title instantly
+          try {
+            window.dispatchEvent(
+              new CustomEvent("chat:updated", {
+                detail: { id: chatId, title: data.title },
+              })
+            );
+          } catch (e) {
+            // best-effort only
+          }
+        } catch (e) {
+          console.error("Failed to set chat title:", e);
+        }
+      }
+
       // Save the new agent_state for the next turn and persist it with the chat
       if (data.agent_state) {
         setAgentState(data.agent_state);
@@ -217,11 +249,9 @@ export default function Chat() {
       if (insertAssistantErr) {
         console.error("Failed to persist assistant message:", insertAssistantErr);
       }
-
-      console.log("===Citations===");
-      console.log(data.citations);
-
       pushMessage("assistant", data.answer || "", data.citations || []);
+
+
     } catch (err) {
       console.error("agentic submit error", err);
       pushMessage("assistant", "Ocurrió un error procesando tu consulta.");
@@ -251,7 +281,7 @@ export default function Chat() {
       {/* Main content inside the SidebarInset so it accounts for the sidebar gap */}
       <SidebarInset className="flex flex-col flex-1 min-h-0 min-w-0 overflow-hidden bg-[#F5F5F7]">
           {/* Sidebar toggle + Space selector (sticky below navbar) */}
-          <div className="flex items-center gap-2 p-2">
+          <div className="flex items-center gap-4 p-4">
             <SidebarTrigger />
             <SpaceSelect
               value={space}
