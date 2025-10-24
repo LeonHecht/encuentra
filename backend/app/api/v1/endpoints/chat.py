@@ -548,7 +548,7 @@ A **design system** is not just a UI kit or component library — it’s a **liv
             response = client.responses.create(
                     model="gpt-5-nano",
                     instructions="Given this user's request, give the Chat a title that will be shown in the list of chats. Return a string of max 5 words. Don't return any additional content, just the title.",
-                    input=[{"role": "user", "content": last_user_msg}],
+                    input=[{"role": "user", "content": last_user_msg[:200]}],
                     reasoning={"effort": "low"},
                 )
             raw_title = response.output_text
