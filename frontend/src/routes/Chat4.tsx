@@ -60,6 +60,7 @@ export default function Chat() {
   );
   const [currentChatId, setCurrentChatId] = useState<string | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
 
   const token = (() => {
     try {
@@ -95,6 +96,38 @@ export default function Chat() {
       { id: `${Date.now()}-${prev.length}`, role, text, citations },
     ]);
   }
+
+  // Auto-scroll so the top of the new assistant message aligns to the top of the scroll area
+  useEffect(() => {
+    if (messages.length === 0) return;
+    const last = messages[messages.length - 1];
+    if (last.role !== "assistant") return;
+
+    // Defer until after layout/any internal stick-to-bottom effects
+    const id = window.setTimeout(() => {
+      const scope: ParentNode | null = scrollContainerRef.current ?? document;
+      const target = scope?.querySelector(
+        `[data-message-id="${CSS.escape(last.id)}"]`
+      ) as HTMLElement | null;
+      if (!target) return;
+
+      if (typeof target.scrollIntoView === "function") {
+        // Scroll the nearest scrollable ancestor so that the message is at the top
+        target.scrollIntoView({ behavior: "smooth", block: "start", inline: "nearest" });
+      } else if (scrollContainerRef.current) {
+        // Fallback: manually compute position relative to the container
+        const container = scrollContainerRef.current;
+        const top = target.getBoundingClientRect().top - container.getBoundingClientRect().top + container.scrollTop;
+        try {
+          container.scrollTo({ top, behavior: "smooth" });
+        } catch {
+          container.scrollTop = top;
+        }
+      }
+    }, 0);
+
+    return () => window.clearTimeout(id);
+  }, [messages]);
 
   const loadChatMessages = useCallback(async (chatId: string) => {
     const { data, error } = await supabase
@@ -296,6 +329,7 @@ export default function Chat() {
               className={`flex-1 min-h-0 overflow-y-auto px-3 pt-2 ${
                 messages.length > 0 ? "pb-24" : "pb-6"
               }`}
+              ref={scrollContainerRef}
             >
               <div className="mx-auto w-full max-w-4xl">
               <Conversation>
@@ -308,7 +342,7 @@ export default function Chat() {
                     </div>
                   ) : (
                     messages.map((m) => (
-                      <Message key={m.id} from={m.role}>
+                      <Message key={m.id} from={m.role} data-message-id={m.id}>
                         <MessageContent>
                           {m.role === "assistant" ? (
                             <MarkdownWithCitations
