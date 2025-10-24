@@ -138,19 +138,6 @@ emit_msg_tool = {
 #     }
 # }
 
-# request_user_input_tool = {
-#   "type": "function",
-#   "name": "request_user_input",
-#   "description": "Use this when you need the user to select or clarify before proceeding.",
-#   "parameters": {
-#     "type": "object",
-#     "properties": {
-#       "prompt": { "type": "string", "description": "Clear question to the user." }
-#     },
-#     "required": ["prompt"]
-#   }
-# }
-
 tools = [
     emit_msg_tool,
     {
@@ -297,6 +284,8 @@ def clip(s, max_chars=16000):
 def sse(event: str, data: Dict[str, Any]) -> str:
     return f"event: {event}\n" + f"data: {json.dumps(data, ensure_ascii=False)}\n\n"
 
+
+# DEPRECATED: use /chat/agentic instead
 @router.get("/chat/stream")
 # async def chat_stream(request: Request, response: Response, user=Depends(get_current_user)):
 async def chat_stream(request: Request, response: Response):
@@ -356,7 +345,7 @@ async def chat_stream(request: Request, response: Response):
             stream = client.chat.completions.create(
                 model=settings.OPENAI_CHAT_MODEL,
                 messages=openai_messages,
-                stream=True,
+                stream=True
             )
             parts = []
             for chunk in stream:
@@ -378,6 +367,18 @@ async def chat_stream(request: Request, response: Response):
         # "Access-Control-Allow-Credentials": "true",
     }
     return StreamingResponse(gen(), media_type="text/event-stream", headers=headers)
+
+
+def normalize_title(raw: str | None, fallback: str | None) -> str | None:
+    """Trim quotes/whitespace and cap to 5 words. Fallback to first 5 words of user msg if empty."""
+    t = (raw or "").strip().strip('"').strip("'")
+    t = re.sub(r"\s+", " ", t)
+    if not t and fallback:
+        t = " ".join((fallback or "").split()[:5]).strip()
+    if t:
+        t = " ".join(t.split()[:5])
+        return t or None
+    return None
 
 
 @router.post("/chat/agentic")
@@ -523,6 +524,8 @@ A **design system** is not just a UI kit or component library — it’s a **liv
         )
         return {
             "answer": final_answer,
+            "title": "Design System Explanation",
+            "inline_citations": [],
             "citations": [],
             "trace_len": len(openai_messages),
             "trace": [],
@@ -534,7 +537,28 @@ A **design system** is not just a UI kit or component library — it’s a **liv
     iteration_count = 0
 
     trace = []
-    
+
+    # Chat's title that will be given by LLM
+    title: str | None = None
+
+    # Only give title if this is a new chat (the first message)
+    if len(openai_messages) == 1:
+        try:
+            print("\n📝 **Generating Chat Title**")
+            response = client.responses.create(
+                    model="gpt-5-nano",
+                    instructions="Given this user's request, give the Chat a title that will be shown in the list of chats. Return a string of max 5 words. Don't return any additional content, just the title.",
+                    input=[{"role": "user", "content": last_user_msg}],
+                    reasoning={"effort": "low"},
+                )
+            raw_title = response.output_text
+            title = normalize_title(raw_title, last_user_msg)
+            print(f"Generated title: {title}")
+        except Exception as e:
+            print(f"[title] generation failed: {e}")
+            # Soft fallback so the UI still gets something usable
+            title = normalize_title("", last_user_msg)
+
     def push_trace(evt):  # uniform schema for UI
         # evt: {type, step, tool?, args?, message?, status?, result_count?}
         trace.append(evt)
@@ -560,8 +584,10 @@ A **design system** is not just a UI kit or component library — it’s a **liv
             parallel_tool_calls=False,
             reasoning={
                 "effort": "medium",
-                "summary": "auto"
-            }
+                "summary": "detailed"
+            },
+            max_tool_calls = 10,
+            tool_choice="auto"
         )
 
         raw_items = response.output    # SDK objects (ResponseOutputMessage, ResponseFunctionToolCall, ...)
@@ -581,7 +607,8 @@ A **design system** is not just a UI kit or component library — it’s a **liv
                 if tool_name == "emit_event":
                     tool_args = json.loads(item.arguments)
 
-                    log_tool_call(iteration_count, tool_name, tool_args, "emitted")
+                    # result to be ack'd back into openai_messages later
+                    result = json.dumps({"ok": True})
                     
                     push_trace({
                         "type": "reasoning",
@@ -590,13 +617,7 @@ A **design system** is not just a UI kit or component library — it’s a **liv
                         "kind": tool_args.get("kind","note"),
                     })
 
-                    # Ack back so the model knows we recorded it
-                    openai_messages.append({
-                        "type": "function_call_output",
-                        "call_id": item.call_id,
-                        "output": json.dumps({"ok": True})
-                    })
-                    continue
+                    log_tool_call(iteration_count, tool_name, tool_args, "emitted")
                 
                 elif tool_name == "search_cases":
                     tool_args = json.loads(item.arguments)
@@ -644,29 +665,7 @@ A **design system** is not just a UI kit or component library — it’s a **liv
                     except Exception as _e:
                         pass
                     push_trace({"type":"tool_result","step":iteration_count,"tool":"fetch_document","result_count":1 if result else 0})
-                    log_tool_call(iteration_count, tool_name, tool_args, result)
-                
-                # elif tool_name == "submit_answer":
-                #     tool_args = json.loads(item.arguments)
-                #     final_answer = tool_args.get("answer", "An internal error occurred.")
-                #     citations = tool_args.get("citations", [])
-                #     push_trace({"type":"final","step":iteration_count,"message":"answer submitted"})
-                    
-                #     # ACK the tool call so the model sees the call completed
-                #     openai_messages.append({
-                #         "type": "function_call_output",
-                #         "call_id": item.call_id,
-                #         "output": json.dumps({"received": True})
-                #     })
-
-                #     openai_messages.append({
-                #         "role": "assistant",
-                #         "content": final_answer
-                #     })
-
-                #     log_tool_call(iteration_count, tool_name, tool_args, final_answer)
-                #     keep_reasoning = False
-                #     break                    
+                    log_tool_call(iteration_count, tool_name, tool_args, result)            
                 
                 else:
                     print(f"❌ **Unknown tool name: {tool_name}**")
@@ -681,6 +680,7 @@ A **design system** is not just a UI kit or component library — it’s a **liv
                     "call_id": item.call_id,
                     "output": str(result),
                 })
+
             elif item.type == "message":
                 # If no tool call is triggered, print the response directly.
                 final_answer = response.output_text
@@ -693,6 +693,7 @@ A **design system** is not just a UI kit or component library — it’s a **liv
                     })
                 keep_reasoning = False
                 break
+
             else:
                 print(f"❓ **Unknown response type: {item.type}**")
     # # Good SSE headers (FastAPI sets content-type; add no-cache/keep-alive)
@@ -727,11 +728,10 @@ A **design system** is not just a UI kit or component library — it’s a **liv
         return occ
 
     inline_occurrences = extract_inline_citations(final_answer)
-    print("=== Inline Citations===")
-    print(inline_occurrences)
 
     return {
         "answer": final_answer,
+        "title": title,
         "citations": dedupe_citations(citations),
         "inline_citations": inline_occurrences,
         "trace_len": len(openai_messages),
