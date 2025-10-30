@@ -2,7 +2,7 @@ import { Routes, Route, Link } from "react-router-dom";
 import Navbar from './components/Navbar';
 import Landing from "./routes/Landing";
 import Search from "./routes/Search";
-import Chat from "./routes/Chat4";
+import Chat from "./routes/Chat5";
 import Uploads from "./routes/Uploads";
 import AuthPage from "./routes/AuthPage";
 // import bg from './assets/landing_bg.png';

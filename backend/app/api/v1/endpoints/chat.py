@@ -11,6 +11,31 @@ from backend.app.core.config import settings
 from backend.app.services.search import search_engine
 from backend.app.dependencies import get_current_user
 
+from dataclasses import dataclass, field
+from typing import Any, List, Dict, Optional
+
+@dataclass
+class AgentConfig:
+    model: str
+    system_prompt: str
+    tools: list
+    max_iterations: int = 10
+    parallel_tool_calls: bool = False
+    reasoning_effort: str = "medium"
+    reasoning_summary: str = "detailed"
+
+@dataclass
+class AgentContext:
+    space: str
+    openai_messages: List[Dict[str, Any]] = field(default_factory=list)
+    last_user_msg: str = ""
+    title: Optional[str] = None
+    citations: List[Dict[str, str]] = field(default_factory=list)
+    trace: List[Dict[str, Any]] = field(default_factory=list)
+    iteration_count: int = 0
+    final_answer: str = ""
+    keep_reasoning: bool = True
+
 
 class AgenticChatRequest(BaseModel):
     space: str
@@ -380,6 +405,111 @@ def normalize_title(raw: str | None, fallback: str | None) -> str | None:
         return t or None
     return None
 
+def extract_inline_citations(text: str):
+    # Parse inline [DocID §citation] markers from the final answer so the UI can place citations exactly inline.
+    # Matches [DocID] or [DocID §hint]; DocID excludes closing bracket and whitespace
+    # Examples: [38949], [38949 §sentencia condenatoria]
+    pattern = re.compile(r"\[([^\]\s]+)(?:\s*§\s*([^\]]+))?\]")
+    occ = []
+    for m in pattern.finditer(text or ""):
+        doc_id = (m.group(1) or "").strip()
+        cite = (m.group(2) or "").strip() if m.lastindex and m.group(2) else ""
+        occ.append({
+            "doc_id": doc_id,
+            "cite": cite,
+            "start": m.start(),
+            "end": m.end(),
+        })
+    return occ
+
+def get_title_for_chat(last_user_msg):
+    try:
+        print("\n📝 **Generating Chat Title**")
+        response = client.responses.create(
+            model="gpt-5-nano",
+            instructions="Given this user's request, give the Chat a title that will be shown in the list of chats. Return a string of max 5 words. Don't return any additional content, just the title.",
+            input=[{"role": "user", "content": last_user_msg[:200]}],
+            reasoning={"effort": "low"},
+        )
+        raw_title = response.output_text
+        title = normalize_title(raw_title, last_user_msg)
+        print(f"Generated title: {title}")
+    except Exception as e:
+        print(f"[title] generation failed: {e}")
+        title = normalize_title("", last_user_msg)
+    return title
+
+def run_tool(ctx: AgentContext, tool_name, tool_args) -> str:
+    """ do before: tool_args = json.loads(item.arguments) """
+    
+    def push_trace(evt):  # uniform schema for UI
+        # evt: {type, step, tool?, args?, message?, status?, result_count?}
+        ctx.trace.append(evt)
+    
+    if tool_name == "emit_event":
+        # result to be ack'd back into openai_messages later
+        result = json.dumps({"ok": True})
+        
+        push_trace({
+            "type": "reasoning",
+            "step": ctx.iteration_count,
+            "message": tool_args.get("message",""),
+            "kind": tool_args.get("kind","note"),
+        })
+
+        log_tool_call(ctx.iteration_count, tool_name, tool_args, "emitted")
+    
+    elif tool_name == "search_cases":
+        query = tool_args.get("query", ctx.last_user_msg)
+        filters = tool_args.get("filters", {})
+        top_k = int(tool_args.get("top_k", 5))
+
+        push_trace({"type":"tool_start","step":ctx.iteration_count,"tool":"search_cases","args":{"query": query,"filters":filters,"top_k":top_k}})
+        result = search_cases(query=query, space=ctx.space, filters=filters, top_k=top_k)
+        push_trace({"type":"tool_result","step":ctx.iteration_count,"tool":"search_cases","result_count":len(result)})
+        log_tool_call(ctx.iteration_count, tool_name, tool_args, result)
+
+    elif tool_name == "fetch_passages":
+        ids = tool_args.get("ids", [])
+        per_id = int(tool_args.get('per_id', 3))
+        max_tokens = int(tool_args.get('max_tokens', 350))
+
+        push_trace({"type":"tool_start","step":ctx.iteration_count,"tool":"fetch_passages","args":{"ids":ids,"per_id":per_id,"max_tokens":max_tokens}})
+        result = fetch_passages(query=ctx.last_user_msg, ids=ids, space=ctx.space, per_id=per_id, max_tokens=max_tokens)
+        try:
+            for p in result or []:
+                did = (p or {}).get("doc_id") or (p or {}).get("id")
+                if did:
+                    snip = (p or {}).get("passage") or (p or {}).get("snippet") or ""
+                    ctx.citations.append({"doc_id": did, "snippet": snip[:400]})
+        except Exception as _e:
+            pass
+        push_trace({"type":"tool_result","step":ctx.iteration_count,"tool":"fetch_passages","result_count":len(result)})
+        log_tool_call(ctx.iteration_count, tool_name, tool_args, result)
+    
+    elif tool_name == "fetch_document":                    
+        doc_id = tool_args.get("id", "")
+        max_tokens = int(tool_args.get("max_tokens", 2048))
+
+        push_trace({"type":"tool_start","step":ctx.iteration_count,"tool":"fetch_document","args":{"id":doc_id,"max_tokens":max_tokens}})
+        result = fetch_document(id=doc_id, space=ctx.space, max_tokens=max_tokens)
+        try:
+            if isinstance(result, dict):
+                did = result.get("id") or doc_id
+                txt = (result.get("text") or "")
+                if did and txt:
+                    ctx.citations.append({"doc_id": did, "snippet": txt[:240]})
+        except Exception as _e:
+            pass
+        push_trace({"type":"tool_result","step":ctx.iteration_count,"tool":"fetch_document","result_count":1 if result else 0})
+        log_tool_call(ctx.iteration_count, tool_name, tool_args, result)            
+    
+    else:
+        print(f"❌ **Unknown tool name: {tool_name}**")
+        result = "Unknown tool"
+
+    return result
+    
 
 @router.post("/chat/agentic")
 # async def chat_stream(request: Request, response: Response, user=Depends(get_current_user)):
@@ -397,11 +527,9 @@ async def chat_agentic(req: AgenticChatRequest):
         except Exception as e:
             print("bad state:", e)
         
-    last_user_msg = req.messages[-1]['content']
-
     # append latest user message from your UI
+    last_user_msg = req.messages[-1]['content']
     openai_messages.append({"role":"user","content": last_user_msg})
-
     print(f"openai_messages: {openai_messages}")
     
     final_answer = ""
@@ -546,11 +674,11 @@ A **design system** is not just a UI kit or component library — it’s a **liv
         try:
             print("\n📝 **Generating Chat Title**")
             response = client.responses.create(
-                    model="gpt-5-nano",
-                    instructions="Given this user's request, give the Chat a title that will be shown in the list of chats. Return a string of max 5 words. Don't return any additional content, just the title.",
-                    input=[{"role": "user", "content": last_user_msg[:200]}],
-                    reasoning={"effort": "low"},
-                )
+                model="gpt-5-nano",
+                instructions="Given this user's request, give the Chat a title that will be shown in the list of chats. Return a string of max 5 words. Don't return any additional content, just the title.",
+                input=[{"role": "user", "content": last_user_msg[:200]}],
+                reasoning={"effort": "low"},
+            )
             raw_title = response.output_text
             title = normalize_title(raw_title, last_user_msg)
             print(f"Generated title: {title}")
@@ -601,7 +729,7 @@ A **design system** is not just a UI kit or component library — it’s a **liv
                 print("💭 **Reasoning Summary:**")
                 print(item.summary[0].text)
                 continue
-            if item.type == "function_call":
+            elif item.type == "function_call":
                 tool_name = item.name
                 
                 if tool_name == "emit_event":
@@ -688,9 +816,9 @@ A **design system** is not just a UI kit or component library — it’s a **liv
                 print(final_answer)
 
                 openai_messages.append({
-                        "role": "assistant",
-                        "content": final_answer
-                    })
+                    "role": "assistant",
+                    "content": final_answer
+                })
                 keep_reasoning = False
                 break
 
@@ -709,23 +837,6 @@ A **design system** is not just a UI kit or component library — it’s a **liv
         "No pude completar el razonamiento completo para contestar su pregunta. "
         "¿Te parece bien que resuma los resultados encontrados hasta ahora?"
         )
-
-        # Parse inline [DocID §citation] markers from the final answer so the UI can place citations exactly inline.
-    def extract_inline_citations(text: str):
-        # Matches [DocID] or [DocID §hint]; DocID excludes closing bracket and whitespace
-        # Examples: [38949], [38949 §sentencia condenatoria]
-        pattern = re.compile(r"\[([^\]\s]+)(?:\s*§\s*([^\]]+))?\]")
-        occ = []
-        for m in pattern.finditer(text or ""):
-            doc_id = (m.group(1) or "").strip()
-            cite = (m.group(2) or "").strip() if m.lastindex and m.group(2) else ""
-            occ.append({
-                "doc_id": doc_id,
-                "cite": cite,
-                "start": m.start(),
-                "end": m.end(),
-            })
-        return occ
 
     inline_occurrences = extract_inline_citations(final_answer)
 
@@ -746,3 +857,198 @@ def dedupe_citations(cites: list[dict]) -> list[dict]:
         if did and did not in seen:
             out.append(c); seen.add(did)
     return out
+
+import asyncio
+import json
+
+@router.post("/chat/agentic/stream")
+async def chat_agentic_stream(req: AgenticChatRequest):
+    
+    openai_messages: list[dict[str, Any]] = []
+    if req.state:
+        try:
+            s = json.loads(req.state)
+            if isinstance(s, list):
+                openai_messages = s
+        except Exception as e:
+            print("bad state:", e)
+
+    last_user_msg = req.messages[-1]['content']
+    openai_messages.append({"role": "user", "content": last_user_msg})
+    print(f"openai_messages: {openai_messages}")
+
+    ctx = AgentContext(space=req.space, openai_messages=openai_messages, last_user_msg=last_user_msg)
+    cfg = AgentConfig(model=settings.OPENAI_CHAT_MODEL, system_prompt=SYSTEM_PROMPT_V1, tools=tools)
+
+    # final_answer = ""
+    # citations: list[dict[str, str]] = []
+    # keep_reasoning = True
+    # max_iterations = 10
+    # iteration_count = 0
+    # trace: list[dict[str, Any]] = []
+
+    # title: str | None = None
+    if len(openai_messages) == 1:
+        set_title = True
+    else:
+        set_title = False
+
+    async def event_stream():
+        nonlocal ctx, cfg
+
+        # helper to emit SSE json with a custom event name
+        async def emit(event: str, obj: dict):
+            yield f"event: {event}\n".encode("utf-8")
+            yield f"data: {json.dumps(obj, ensure_ascii=False)}\n\n".encode("utf-8")
+
+        while ctx.keep_reasoning and ctx.iteration_count < cfg.max_iterations:
+            ctx.iteration_count += 1
+            print(f"\n🔄 **Reasoning Iteration {ctx.iteration_count}**")
+
+            extra_finalize_note = (
+                "You have reached the maximum reasoning iterations. "
+                "Do NOT call more tools. Produce the final answer now. If you still couldn't gather enough information, state that clearly in your answer. It is better to be honest than to invent information."
+            )
+            if ctx.iteration_count == cfg.max_iterations:
+                final_instructions = f"{cfg.system_prompt}\n\n[control] {extra_finalize_note}"
+            else:
+                final_instructions = cfg.system_prompt
+
+            stream = client.responses.create(
+                model=cfg.model,
+                instructions=final_instructions,
+                input=ctx.openai_messages,
+                tools=cfg.tools,
+                parallel_tool_calls=cfg.parallel_tool_calls,
+                reasoning={"effort": cfg.reasoning_effort, "summary": cfg.reasoning_summary},
+                max_tool_calls=cfg.max_iterations,
+                tool_choice="auto",
+                stream=True,
+            )
+
+            # Local accumulators for this streamed turn
+            acc_text: list[str] = []
+            
+            final_tool_calls = {}
+            for ev in stream:
+                t = getattr(ev, "type", None)
+
+                # Output Item
+                if t == "response.output_item.added":
+                    if ev.item.type == "function_call":
+                        final_tool_calls[ev.output_index] = ev.item
+                    elif ev.item.type == "reasoning":
+                        pass  # no action needed
+
+                # Reasoning (UI)
+                if t == "response.reasoning_summary_text.delta":
+                    d = getattr(ev, "delta", "") or ""
+                    await asyncio.sleep(0)  # optional, helps flush
+                    async for chunk in emit("reasoning.summary", {"step": ctx.iteration_count, "delta": d}):
+                        yield chunk
+                if t == "response.reasoning_text.delta":
+                    d = getattr(ev, "delta", "") or ""
+                    await asyncio.sleep(0)  # optional, helps flush
+                    async for chunk in emit("reasoning.text", {"step": ctx.iteration_count, "delta": d}):
+                        yield chunk
+                if t == "response.reasoning_summary_part.added":
+                    # p = getattr(ev, "part", "") or ""
+                    # await asyncio.sleep(0)  # optional, helps flush
+                    # async for chunk in emit("reasoning.summary_part", {"step": ctx.iteration_count, "part": p}):
+                    #     yield chunk
+                    pass
+
+                # Function tools
+                if t == "response.function_call_arguments.delta":
+                    index = ev.output_index
+                    if final_tool_calls[index]:
+                        final_tool_calls[index].arguments += ev.delta
+
+                if t == "response.function_call_arguments.done":
+                    # tool_name = getattr(ev, "name") or ""
+                    # tool_args = json.loads(getattr(ev, "arguments")) or []
+                    # call_id = getattr(ev, "item_id")
+                    break
+                # Output text
+                if t == "response.output_text.delta":
+                    d = getattr(ev, "delta", "") or ""
+                    acc_text.append(d)
+                    await asyncio.sleep(0)  # optional, helps flush
+                    async for chunk in emit("response.output_text.delta", {"step": ctx.iteration_count, "delta": d}):
+                        yield chunk
+                if t == "response.output_text.done":
+                    txt = getattr(ev, "text", "") or ""
+                    ctx.final_answer = txt or "".join(acc_text)
+                    await asyncio.sleep(0)  # optional, helps flush
+                    async for chunk in emit("response.output_text.done", {"step": ctx.iteration_count, "text": ctx.final_answer}):
+                        yield chunk
+
+                    if ctx.final_answer:
+                        ctx.openai_messages.append({
+                            "role": "assistant",
+                            "content": ctx.final_answer
+                        })
+                    ctx.keep_reasoning = False
+
+                # Completion
+                if t == "response.completed":
+                    pass
+
+            stream.close()
+
+            for tool_call_index in final_tool_calls:
+                tool_call = final_tool_calls[tool_call_index]
+                    
+                tool_name = getattr(tool_call, "name")
+                tool_args = json.loads(getattr(tool_call, "arguments"))
+                call_id = getattr(tool_call, "call_id")
+
+                ctx.openai_messages.append({
+                    "type": "function_call",
+                    "name": tool_name,
+                    "arguments": json.dumps(tool_args, ensure_ascii=False),
+                    "call_id": call_id
+                })
+
+                result = run_tool(ctx, tool_name, tool_args)
+
+                # clip result to prevent context balooning (cost management)
+                result = clip(str(result))
+
+                print(f"🛠️ **Tool {tool_name} returned result (start): {result[:400]}**")
+
+                # Append tool call and observation to messages for next iteration
+                ctx.openai_messages.append({
+                    "type": "function_call_output",
+                    "call_id": call_id,
+                    "output": str(result),
+                })
+            
+            continue  # next reasoning iteration
+
+        if ctx.final_answer == "":
+            ctx.final_answer = (
+                "No pude completar el razonamiento completo para contestar su pregunta. "
+                "¿Te parece bien que resuma los resultados encontrados hasta ahora?"
+            )
+
+        inline_occurrences = extract_inline_citations(ctx.final_answer)
+
+        if set_title and not ctx.title:
+            ctx.title = get_title_for_chat(last_user_msg)
+
+        completed_payload = {
+            "answer": ctx.final_answer,
+            "title": ctx.title,
+            "citations": dedupe_citations(ctx.citations),
+            "inline_citations": inline_occurrences,
+            "trace_len": len(ctx.openai_messages),
+            "trace": ctx.trace,
+            "agent_state": json.dumps(ctx.openai_messages),
+        }
+
+        # Final summary event (mirrors your non-stream return payload)
+        async for chunk in emit("response.completed", completed_payload):
+            yield chunk
+    
+    return StreamingResponse(event_stream(), media_type="text/event-stream")
