@@ -439,7 +439,7 @@ def get_title_for_chat(last_user_msg):
         title = normalize_title("", last_user_msg)
     return title
 
-def run_tool(ctx: AgentContext, tool_name, tool_args, call_id) -> None:
+def run_tool(ctx: AgentContext, tool_name, tool_args) -> str:
     """ do before: tool_args = json.loads(item.arguments) """
     
     def push_trace(evt):  # uniform schema for UI
@@ -459,7 +459,7 @@ def run_tool(ctx: AgentContext, tool_name, tool_args, call_id) -> None:
 
         log_tool_call(ctx.iteration_count, tool_name, tool_args, "emitted")
     
-    if tool_name == "search_cases":
+    elif tool_name == "search_cases":
         query = tool_args.get("query", ctx.last_user_msg)
         filters = tool_args.get("filters", {})
         top_k = int(tool_args.get("top_k", 5))
@@ -508,16 +508,8 @@ def run_tool(ctx: AgentContext, tool_name, tool_args, call_id) -> None:
         print(f"❌ **Unknown tool name: {tool_name}**")
         result = "Unknown tool"
 
-    # clip result to prevent context balooning (cost management)
-    result = clip(str(result))
-
-    # Append tool call and observation to messages for next iteration
-    ctx.openai_messages.append({
-        "type": "function_call_output",
-        "call_id": call_id,
-        "output": str(result),
-    })
-
+    return result
+    
 
 @router.post("/chat/agentic")
 # async def chat_stream(request: Request, response: Response, user=Depends(get_current_user)):
@@ -737,7 +729,7 @@ A **design system** is not just a UI kit or component library — it’s a **liv
                 print("💭 **Reasoning Summary:**")
                 print(item.summary[0].text)
                 continue
-            if item.type == "function_call":
+            elif item.type == "function_call":
                 tool_name = item.name
                 
                 if tool_name == "emit_event":
@@ -897,7 +889,9 @@ async def chat_agentic_stream(req: AgenticChatRequest):
 
     # title: str | None = None
     if len(openai_messages) == 1:
-        ctx.title = get_title_for_chat(last_user_msg) 
+        set_title = True
+    else:
+        set_title = False
 
     async def event_stream():
         nonlocal ctx, cfg
@@ -934,10 +928,17 @@ async def chat_agentic_stream(req: AgenticChatRequest):
 
             # Local accumulators for this streamed turn
             acc_text: list[str] = []
-            tool_called_this_turn = False
-
+            
+            final_tool_calls = {}
             for ev in stream:
                 t = getattr(ev, "type", None)
+
+                # Output Item
+                if t == "response.output_item.added":
+                    if ev.item.type == "function_call":
+                        final_tool_calls[ev.output_index] = ev.item
+                    elif ev.item.type == "reasoning":
+                        pass  # no action needed
 
                 # Reasoning (UI)
                 if t == "response.reasoning_summary_text.delta":
@@ -945,20 +946,29 @@ async def chat_agentic_stream(req: AgenticChatRequest):
                     await asyncio.sleep(0)  # optional, helps flush
                     async for chunk in emit("reasoning.summary", {"step": ctx.iteration_count, "delta": d}):
                         yield chunk
-                    continue
                 if t == "response.reasoning_text.delta":
                     d = getattr(ev, "delta", "") or ""
                     await asyncio.sleep(0)  # optional, helps flush
                     async for chunk in emit("reasoning.text", {"step": ctx.iteration_count, "delta": d}):
                         yield chunk
-                    continue
                 if t == "response.reasoning_summary_part.added":
-                    p = getattr(ev, "part", "") or ""
-                    await asyncio.sleep(0)  # optional, helps flush
-                    async for chunk in emit("reasoning.summary_part", {"step": ctx.iteration_count, "part": p}):
-                        yield chunk
-                    continue
-                    
+                    # p = getattr(ev, "part", "") or ""
+                    # await asyncio.sleep(0)  # optional, helps flush
+                    # async for chunk in emit("reasoning.summary_part", {"step": ctx.iteration_count, "part": p}):
+                    #     yield chunk
+                    pass
+
+                # Function tools
+                if t == "response.function_call_arguments.delta":
+                    index = ev.output_index
+                    if final_tool_calls[index]:
+                        final_tool_calls[index].arguments += ev.delta
+
+                if t == "response.function_call_arguments.done":
+                    # tool_name = getattr(ev, "name") or ""
+                    # tool_args = json.loads(getattr(ev, "arguments")) or []
+                    # call_id = getattr(ev, "item_id")
+                    break
                 # Output text
                 if t == "response.output_text.delta":
                     d = getattr(ev, "delta", "") or ""
@@ -966,44 +976,55 @@ async def chat_agentic_stream(req: AgenticChatRequest):
                     await asyncio.sleep(0)  # optional, helps flush
                     async for chunk in emit("response.output_text.delta", {"step": ctx.iteration_count, "delta": d}):
                         yield chunk
-                    continue
                 if t == "response.output_text.done":
                     txt = getattr(ev, "text", "") or ""
                     ctx.final_answer = txt or "".join(acc_text)
                     await asyncio.sleep(0)  # optional, helps flush
                     async for chunk in emit("response.output_text.done", {"step": ctx.iteration_count, "text": ctx.final_answer}):
                         yield chunk
-                    continue
 
-                # Function tools
-                if t == "response.function_call_arguments.delta":
-                    continue
-                if t == "response.function_call_arguments.done":
-                    tool_name = getattr(ev, "name")
-                    tool_args = json.loads(getattr(ev, "arguments"))
-                    call_id = getattr(ev, "item_id")
-
-                    run_tool(ctx, tool_name, tool_args, call_id)
-
-                    tool_called_this_turn = True
-                    break
-
-                # Completion
-                if t == "response.completed":
-                    # finalize state
-                    if not ctx.final_answer:
-                        ctx.final_answer = "".join(acc_text).strip()
                     if ctx.final_answer:
                         ctx.openai_messages.append({
                             "role": "assistant",
                             "content": ctx.final_answer
                         })
                     ctx.keep_reasoning = False
-                    break
 
-            # If a tool was called, continue loop (no streaming text yet)
-            if tool_called_this_turn:
-                continue
+                # Completion
+                if t == "response.completed":
+                    pass
+
+            stream.close()
+
+            for tool_call_index in final_tool_calls:
+                tool_call = final_tool_calls[tool_call_index]
+                    
+                tool_name = getattr(tool_call, "name")
+                tool_args = json.loads(getattr(tool_call, "arguments"))
+                call_id = getattr(tool_call, "call_id")
+
+                ctx.openai_messages.append({
+                    "type": "function_call",
+                    "name": tool_name,
+                    "arguments": json.dumps(tool_args, ensure_ascii=False),
+                    "call_id": call_id
+                })
+
+                result = run_tool(ctx, tool_name, tool_args)
+
+                # clip result to prevent context balooning (cost management)
+                result = clip(str(result))
+
+                print(f"🛠️ **Tool {tool_name} returned result (start): {result[:400]}**")
+
+                # Append tool call and observation to messages for next iteration
+                ctx.openai_messages.append({
+                    "type": "function_call_output",
+                    "call_id": call_id,
+                    "output": str(result),
+                })
+            
+            continue  # next reasoning iteration
 
         if ctx.final_answer == "":
             ctx.final_answer = (
@@ -1012,6 +1033,9 @@ async def chat_agentic_stream(req: AgenticChatRequest):
             )
 
         inline_occurrences = extract_inline_citations(ctx.final_answer)
+
+        if set_title and not ctx.title:
+            ctx.title = get_title_for_chat(last_user_msg)
 
         completed_payload = {
             "answer": ctx.final_answer,
@@ -1026,5 +1050,5 @@ async def chat_agentic_stream(req: AgenticChatRequest):
         # Final summary event (mirrors your non-stream return payload)
         async for chunk in emit("response.completed", completed_payload):
             yield chunk
-
+    
     return StreamingResponse(event_stream(), media_type="text/event-stream")
