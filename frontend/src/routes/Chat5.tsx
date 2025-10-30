@@ -87,6 +87,41 @@ export default function Chat() {
     };
   }, []);
 
+  function scrollMessageToTop(messageId: string) {
+    const container = scrollContainerRef.current;
+    if (!container) return;
+
+    const target = container.querySelector(
+      `[data-message-id="${CSS.escape(messageId)}"]`
+    ) as HTMLElement | null;
+    if (!target) return;
+
+    const top =
+      target.getBoundingClientRect().top -
+      container.getBoundingClientRect().top +
+      container.scrollTop;
+
+    try {
+      // instant jump; change to 'smooth' if you prefer animation
+      container.scrollTo({ top, behavior: "auto" });
+    } catch {
+      container.scrollTop = top;
+    }
+  }
+
+  // After a new user message is rendered, align it to the top of the scroll container
+  useEffect(() => {
+    if (messages.length === 0) return;
+    const last = messages[messages.length - 1];
+    if (last.role !== "user") return;
+
+    const id = window.setTimeout(() => {
+      scrollMessageToTop(last.id);
+    }, 0);
+
+    return () => window.clearTimeout(id);
+  }, [messages]);
+
   function pushMessage(
     role: "user" | "assistant",
     text: string,
@@ -97,38 +132,6 @@ export default function Chat() {
       { id: `${Date.now()}-${prev.length}`, role, text, citations },
     ]);
   }
-
-  // Auto-scroll so the top of the new assistant message aligns to the top of the scroll area
-  useEffect(() => {
-    if (messages.length === 0) return;
-    const last = messages[messages.length - 1];
-    if (last.role !== "assistant") return;
-
-    // Defer until after layout/any internal stick-to-bottom effects
-    const id = window.setTimeout(() => {
-      const scope: ParentNode | null = scrollContainerRef.current ?? document;
-      const target = scope?.querySelector(
-        `[data-message-id="${CSS.escape(last.id)}"]`
-      ) as HTMLElement | null;
-      if (!target) return;
-
-      if (typeof target.scrollIntoView === "function") {
-        // Scroll the nearest scrollable ancestor so that the message is at the top
-        target.scrollIntoView({ behavior: "smooth", block: "start", inline: "nearest" });
-      } else if (scrollContainerRef.current) {
-        // Fallback: manually compute position relative to the container
-        const container = scrollContainerRef.current;
-        const top = target.getBoundingClientRect().top - container.getBoundingClientRect().top + container.scrollTop;
-        try {
-          container.scrollTo({ top, behavior: "smooth" });
-        } catch {
-          container.scrollTop = top;
-        }
-      }
-    }, 0);
-
-    return () => window.clearTimeout(id);
-  }, [messages]);
 
   const loadChatMessages = useCallback(async (chatId: string) => {
     const { data, error } = await supabase
