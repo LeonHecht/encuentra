@@ -824,9 +824,9 @@ A **design system** is not just a UI kit or component library — it’s a **liv
                 print(final_answer)
 
                 openai_messages.append({
-                        "role": "assistant",
-                        "content": final_answer
-                    })
+                    "role": "assistant",
+                    "content": final_answer
+                })
                 keep_reasoning = False
                 break
 
@@ -969,9 +969,9 @@ async def chat_agentic_stream(req: AgenticChatRequest):
                     continue
                 if t == "response.output_text.done":
                     txt = getattr(ev, "text", "") or ""
-                    ctx.final_answer = txt
+                    ctx.final_answer = txt or "".join(acc_text)
                     await asyncio.sleep(0)  # optional, helps flush
-                    async for chunk in emit("response.output_text.done", {"step": ctx.iteration_count, "text": txt}):
+                    async for chunk in emit("response.output_text.done", {"step": ctx.iteration_count, "text": ctx.final_answer}):
                         yield chunk
                     continue
 
@@ -990,6 +990,15 @@ async def chat_agentic_stream(req: AgenticChatRequest):
 
                 # Completion
                 if t == "response.completed":
+                    # finalize state
+                    if not ctx.final_answer:
+                        ctx.final_answer = "".join(acc_text).strip()
+                    if ctx.final_answer:
+                        ctx.openai_messages.append({
+                            "role": "assistant",
+                            "content": ctx.final_answer
+                        })
+                    ctx.keep_reasoning = False
                     break
 
             # If a tool was called, continue loop (no streaming text yet)
