@@ -11,6 +11,31 @@ from backend.app.core.config import settings
 from backend.app.services.search import search_engine
 from backend.app.dependencies import get_current_user
 
+from dataclasses import dataclass, field
+from typing import Any, List, Dict, Optional
+
+@dataclass
+class AgentConfig:
+    model: str
+    system_prompt: str
+    tools: list
+    max_iterations: int = 10
+    parallel_tool_calls: bool = False
+    reasoning_effort: str = "medium"
+    reasoning_summary: str = "detailed"
+
+@dataclass
+class AgentContext:
+    space: str
+    openai_messages: List[Dict[str, Any]] = field(default_factory=list)
+    last_user_msg: str = ""
+    title: Optional[str] = None
+    citations: List[Dict[str, str]] = field(default_factory=list)
+    trace: List[Dict[str, Any]] = field(default_factory=list)
+    iteration_count: int = 0
+    final_answer: str = ""
+    keep_reasoning: bool = True
+
 
 class AgenticChatRequest(BaseModel):
     space: str
@@ -397,6 +422,102 @@ def extract_inline_citations(text: str):
         })
     return occ
 
+def get_title_for_chat(last_user_msg):
+    try:
+        print("\n📝 **Generating Chat Title**")
+        response = client.responses.create(
+            model="gpt-5-nano",
+            instructions="Given this user's request, give the Chat a title that will be shown in the list of chats. Return a string of max 5 words. Don't return any additional content, just the title.",
+            input=[{"role": "user", "content": last_user_msg[:200]}],
+            reasoning={"effort": "low"},
+        )
+        raw_title = response.output_text
+        title = normalize_title(raw_title, last_user_msg)
+        print(f"Generated title: {title}")
+    except Exception as e:
+        print(f"[title] generation failed: {e}")
+        title = normalize_title("", last_user_msg)
+    return title
+
+def run_tool(ctx: AgentContext, tool_name, tool_args, call_id) -> None:
+    """ do before: tool_args = json.loads(item.arguments) """
+    
+    def push_trace(evt):  # uniform schema for UI
+        # evt: {type, step, tool?, args?, message?, status?, result_count?}
+        ctx.trace.append(evt)
+    
+    if tool_name == "emit_event":
+        # result to be ack'd back into openai_messages later
+        result = json.dumps({"ok": True})
+        
+        push_trace({
+            "type": "reasoning",
+            "step": ctx.iteration_count,
+            "message": tool_args.get("message",""),
+            "kind": tool_args.get("kind","note"),
+        })
+
+        log_tool_call(ctx.iteration_count, tool_name, tool_args, "emitted")
+    
+    if tool_name == "search_cases":
+        query = tool_args.get("query", ctx.last_user_msg)
+        filters = tool_args.get("filters", {})
+        top_k = int(tool_args.get("top_k", 5))
+
+        push_trace({"type":"tool_start","step":ctx.iteration_count,"tool":"search_cases","args":{"query": query,"filters":filters,"top_k":top_k}})
+        result = search_cases(query=query, space=ctx.space, filters=filters, top_k=top_k)
+        push_trace({"type":"tool_result","step":ctx.iteration_count,"tool":"search_cases","result_count":len(result)})
+        log_tool_call(ctx.iteration_count, tool_name, tool_args, result)
+
+    elif tool_name == "fetch_passages":
+        ids = tool_args.get("ids", [])
+        per_id = int(tool_args.get('per_id', 3))
+        max_tokens = int(tool_args.get('max_tokens', 350))
+
+        push_trace({"type":"tool_start","step":ctx.iteration_count,"tool":"fetch_passages","args":{"ids":ids,"per_id":per_id,"max_tokens":max_tokens}})
+        result = fetch_passages(query=ctx.last_user_msg, ids=ids, space=ctx.space, per_id=per_id, max_tokens=max_tokens)
+        try:
+            for p in result or []:
+                did = (p or {}).get("doc_id") or (p or {}).get("id")
+                if did:
+                    snip = (p or {}).get("passage") or (p or {}).get("snippet") or ""
+                    ctx.citations.append({"doc_id": did, "snippet": snip[:400]})
+        except Exception as _e:
+            pass
+        push_trace({"type":"tool_result","step":ctx.iteration_count,"tool":"fetch_passages","result_count":len(result)})
+        log_tool_call(ctx.iteration_count, tool_name, tool_args, result)
+    
+    elif tool_name == "fetch_document":                    
+        doc_id = tool_args.get("id", "")
+        max_tokens = int(tool_args.get("max_tokens", 2048))
+
+        push_trace({"type":"tool_start","step":ctx.iteration_count,"tool":"fetch_document","args":{"id":doc_id,"max_tokens":max_tokens}})
+        result = fetch_document(id=doc_id, space=ctx.space, max_tokens=max_tokens)
+        try:
+            if isinstance(result, dict):
+                did = result.get("id") or doc_id
+                txt = (result.get("text") or "")
+                if did and txt:
+                    ctx.citations.append({"doc_id": did, "snippet": txt[:240]})
+        except Exception as _e:
+            pass
+        push_trace({"type":"tool_result","step":ctx.iteration_count,"tool":"fetch_document","result_count":1 if result else 0})
+        log_tool_call(ctx.iteration_count, tool_name, tool_args, result)            
+    
+    else:
+        print(f"❌ **Unknown tool name: {tool_name}**")
+        result = "Unknown tool"
+
+    # clip result to prevent context balooning (cost management)
+    result = clip(str(result))
+
+    # Append tool call and observation to messages for next iteration
+    ctx.openai_messages.append({
+        "type": "function_call_output",
+        "call_id": call_id,
+        "output": str(result),
+    })
+
 
 @router.post("/chat/agentic")
 # async def chat_stream(request: Request, response: Response, user=Depends(get_current_user)):
@@ -750,9 +871,7 @@ import json
 
 @router.post("/chat/agentic/stream")
 async def chat_agentic_stream(req: AgenticChatRequest):
-    # --- Same parsing as /chat/agentic ---
-    space = req.space
-
+    
     openai_messages: list[dict[str, Any]] = []
     if req.state:
         try:
@@ -766,219 +885,133 @@ async def chat_agentic_stream(req: AgenticChatRequest):
     openai_messages.append({"role": "user", "content": last_user_msg})
     print(f"openai_messages: {openai_messages}")
 
-    final_answer = ""
-    citations: list[dict[str, str]] = []
-    keep_reasoning = True
-    max_iterations = 10
-    iteration_count = 0
-    trace: list[dict[str, Any]] = []
+    ctx = AgentContext(space=req.space, openai_messages=openai_messages, last_user_msg=last_user_msg)
+    cfg = AgentConfig(model=settings.OPENAI_CHAT_MODEL, system_prompt=SYSTEM_PROMPT_V1, tools=tools)
 
-    title: str | None = None
+    # final_answer = ""
+    # citations: list[dict[str, str]] = []
+    # keep_reasoning = True
+    # max_iterations = 10
+    # iteration_count = 0
+    # trace: list[dict[str, Any]] = []
+
+    # title: str | None = None
     if len(openai_messages) == 1:
-        try:
-            print("\n📝 **Generating Chat Title**")
-            response = client.responses.create(
-                model="gpt-5-nano",
-                instructions="Given this user's request, give the Chat a title that will be shown in the list of chats. Return a string of max 5 words. Don't return any additional content, just the title.",
-                input=[{"role": "user", "content": last_user_msg[:200]}],
-                reasoning={"effort": "low"},
-            )
-            raw_title = response.output_text
-            title = normalize_title(raw_title, last_user_msg)
-            print(f"Generated title: {title}")
-        except Exception as e:
-            print(f"[title] generation failed: {e}")
-            title = normalize_title("", last_user_msg)
-
-    def push_trace(evt: dict[str, Any]):
-        trace.append(evt)
+        ctx.title = get_title_for_chat(last_user_msg) 
 
     async def event_stream():
-        nonlocal keep_reasoning, iteration_count, final_answer
+        nonlocal ctx, cfg
 
         # helper to emit SSE json with a custom event name
         async def emit(event: str, obj: dict):
             yield f"event: {event}\n".encode("utf-8")
             yield f"data: {json.dumps(obj, ensure_ascii=False)}\n\n".encode("utf-8")
 
-        while keep_reasoning and iteration_count < max_iterations:
-            iteration_count += 1
-            print(f"\n🔄 **Reasoning Iteration {iteration_count}**")
+        while ctx.keep_reasoning and ctx.iteration_count < cfg.max_iterations:
+            ctx.iteration_count += 1
+            print(f"\n🔄 **Reasoning Iteration {ctx.iteration_count}**")
 
             extra_finalize_note = (
                 "You have reached the maximum reasoning iterations. "
                 "Do NOT call more tools. Produce the final answer now. If you still couldn't gather enough information, state that clearly in your answer. It is better to be honest than to invent information."
             )
-            if iteration_count == max_iterations:
-                final_instructions = f"{SYSTEM_PROMPT_V1}\n\n[control] {extra_finalize_note}"
+            if ctx.iteration_count == cfg.max_iterations:
+                final_instructions = f"{cfg.system_prompt}\n\n[control] {extra_finalize_note}"
             else:
-                final_instructions = SYSTEM_PROMPT_V1
+                final_instructions = cfg.system_prompt
 
-            # --- STREAMING CHANGE ONLY when allowing a direct message output ---
-            # We first attempt a normal (non-stream) turn to let the model decide about tools.
-            response = client.responses.create(
-                model=settings.OPENAI_CHAT_MODEL,
+            stream = client.responses.create(
+                model=cfg.model,
                 instructions=final_instructions,
-                input=openai_messages,
-                tools=tools,
-                parallel_tool_calls=False,
-                reasoning={"effort": "medium", "summary": "detailed"},
-                max_tool_calls=10,
+                input=ctx.openai_messages,
+                tools=cfg.tools,
+                parallel_tool_calls=cfg.parallel_tool_calls,
+                reasoning={"effort": cfg.reasoning_effort, "summary": cfg.reasoning_summary},
+                max_tool_calls=cfg.max_iterations,
                 tool_choice="auto",
+                stream=True,
             )
 
-            raw_items = response.output
-            openai_messages += sanitize_output_items(raw_items)
-
+            # Local accumulators for this streamed turn
+            acc_text: list[str] = []
             tool_called_this_turn = False
 
-            for item in raw_items:
-                if item.type == "reasoning" and item.summary:
-                    await asyncio.sleep(0)  # let loop breathe
-                    async for chunk in emit("reasoning.summary", {"step": iteration_count, "summary": item.summary[0].text}):
+            for ev in stream:
+                t = getattr(ev, "type", None)
+
+                # Reasoning (UI)
+                if t == "response.reasoning_summary_text.delta":
+                    d = getattr(ev, "delta", "") or ""
+                    await asyncio.sleep(0)  # optional, helps flush
+                    async for chunk in emit("reasoning.summary", {"step": ctx.iteration_count, "delta": d}):
+                        yield chunk
+                    continue
+                if t == "response.reasoning_text.delta":
+                    d = getattr(ev, "delta", "") or ""
+                    await asyncio.sleep(0)  # optional, helps flush
+                    async for chunk in emit("reasoning.text", {"step": ctx.iteration_count, "delta": d}):
+                        yield chunk
+                    continue
+                if t == "response.reasoning_summary_part.added":
+                    p = getattr(ev, "part", "") or ""
+                    await asyncio.sleep(0)  # optional, helps flush
+                    async for chunk in emit("reasoning.summary_part", {"step": ctx.iteration_count, "part": p}):
+                        yield chunk
+                    continue
+                    
+                # Output text
+                if t == "response.output_text.delta":
+                    d = getattr(ev, "delta", "") or ""
+                    acc_text.append(d)
+                    await asyncio.sleep(0)  # optional, helps flush
+                    async for chunk in emit("response.output_text.delta", {"step": ctx.iteration_count, "delta": d}):
+                        yield chunk
+                    continue
+                if t == "response.output_text.done":
+                    txt = getattr(ev, "text", "") or ""
+                    ctx.final_answer = txt
+                    await asyncio.sleep(0)  # optional, helps flush
+                    async for chunk in emit("response.output_text.done", {"step": ctx.iteration_count, "text": txt}):
                         yield chunk
                     continue
 
-                if item.type == "function_call":
+                # Function tools
+                if t == "response.function_call_arguments.delta":
+                    continue
+                if t == "response.function_call_arguments.done":
+                    tool_name = getattr(ev, "name")
+                    tool_args = json.loads(getattr(ev, "arguments"))
+                    call_id = getattr(ev, "item_id")
+
+                    run_tool(ctx, tool_name, tool_args, call_id)
+
                     tool_called_this_turn = True
-                    tool_name = item.name
-                    try:
-                        tool_args = json.loads(item.arguments)
-                    except Exception:
-                        tool_args = {}
+                    break
 
-                    if tool_name == "emit_event":
-                        result = json.dumps({"ok": True})
-                        push_trace({
-                            "type": "reasoning",
-                            "step": iteration_count,
-                            "message": tool_args.get("message", ""),
-                            "kind": tool_args.get("kind", "note"),
-                        })
-                        await asyncio.sleep(0)
-                        async for chunk in emit("trace", {"type": "reasoning", "step": iteration_count, "message": tool_args.get("message", ""), "kind": tool_args.get("kind", "note")}):
-                            yield chunk
-                        log_tool_call(iteration_count, tool_name, tool_args, "emitted")
-
-                    elif tool_name == "search_cases":
-                        query = tool_args.get("query", last_user_msg)
-                        filters = tool_args.get("filters", {})
-                        top_k = int(tool_args.get("top_k", 5))
-                        push_trace({"type": "tool_start", "step": iteration_count, "tool": "search_cases", "args": {"query": query, "filters": filters, "top_k": top_k}})
-                        async for chunk in emit("tool.start", {"step": iteration_count, "tool": "search_cases", "args": {"query": query, "filters": filters, "top_k": top_k}}):
-                            yield chunk
-                        result = search_cases(query=query, space=space, filters=filters, top_k=top_k)
-                        push_trace({"type": "tool_result", "step": iteration_count, "tool": "search_cases", "result_count": len(result)})
-                        async for chunk in emit("tool.result", {"step": iteration_count, "tool": "search_cases", "result_count": len(result)}):
-                            yield chunk
-                        log_tool_call(iteration_count, tool_name, tool_args, result)
-
-                    elif tool_name == "fetch_passages":
-                        ids = tool_args.get("ids", [])
-                        per_id = int(tool_args.get("per_id", 3))
-                        max_tokens = int(tool_args.get("max_tokens", 350))
-                        push_trace({"type": "tool_start", "step": iteration_count, "tool": "fetch_passages", "args": {"ids": ids, "per_id": per_id, "max_tokens": max_tokens}})
-                        async for chunk in emit("tool.start", {"step": iteration_count, "tool": "fetch_passages", "args": {"ids": ids, "per_id": per_id, "max_tokens": max_tokens}}):
-                            yield chunk
-                        result = fetch_passages(query=last_user_msg, ids=ids, space=space, per_id=per_id, max_tokens=max_tokens)
-                        try:
-                            for p in result or []:
-                                did = (p or {}).get("doc_id") or (p or {}).get("id")
-                                if did:
-                                    snip = (p or {}).get("passage") or (p or {}).get("snippet") or ""
-                                    citations.append({"doc_id": did, "snippet": snip[:400]})
-                        except Exception:
-                            pass
-                        push_trace({"type": "tool_result", "step": iteration_count, "tool": "fetch_passages", "result_count": len(result)})
-                        async for chunk in emit("tool.result", {"step": iteration_count, "tool": "fetch_passages", "result_count": len(result)}):
-                            yield chunk
-                        log_tool_call(iteration_count, tool_name, tool_args, result)
-
-                    elif tool_name == "fetch_document":
-                        doc_id = tool_args.get("id", "")
-                        max_tokens = int(tool_args.get("max_tokens", 2048))
-                        push_trace({"type": "tool_start", "step": iteration_count, "tool": "fetch_document", "args": {"id": doc_id, "max_tokens": max_tokens}})
-                        async for chunk in emit("tool.start", {"step": iteration_count, "tool": "fetch_document", "args": {"id": doc_id, "max_tokens": max_tokens}}):
-                            yield chunk
-                        result = fetch_document(id=doc_id, space=space, max_tokens=max_tokens)
-                        try:
-                            if isinstance(result, dict):
-                                did = result.get("id") or doc_id
-                                txt = (result.get("text") or "")
-                                if did and txt:
-                                    citations.append({"doc_id": did, "snippet": txt[:240]})
-                        except Exception:
-                            pass
-                        push_trace({"type": "tool_result", "step": iteration_count, "tool": "fetch_document", "result_count": 1 if result else 0})
-                        async for chunk in emit("tool.result", {"step": iteration_count, "tool": "fetch_document", "result_count": 1 if result else 0}):
-                            yield chunk
-                        log_tool_call(iteration_count, tool_name, tool_args, result)
-
-                    else:
-                        print(f"❌ **Unknown tool name: {tool_name}**")
-                        result = "Unknown tool"
-
-                    result = clip(str(result))
-                    openai_messages.append({
-                        "type": "function_call_output",
-                        "call_id": item.call_id,
-                        "output": str(result),
-                    })
-
-                elif item.type == "message":
-                    # --- STREAM the assistant text for this final turn ---
-                    print("💡 **Message from LLM (streaming)**")
-                    # Re-run this exact turn with streaming to get deltas only for the assistant text
-                    stream = client.responses.create(
-                        model=settings.OPENAI_CHAT_MODEL,
-                        instructions=final_instructions,
-                        input=openai_messages[:-1],  # everything up to but NOT including the assistant message we just appended
-                        tools=tools,
-                        parallel_tool_calls=False,
-                        reasoning={"effort": "medium", "summary": "detailed"},
-                        max_tool_calls=10,
-                        tool_choice="auto",
-                        stream=True,        # <- only change here
-                    )
-
-                    # Accumulate the final text to preserve identical return semantics in the last "completed" event
-                    text_buf = []
-
-                    for ev in stream:
-                        t = getattr(ev, "type", None)
-                        if t == "response.output_text.delta":
-                            d = ev.delta
-                            text_buf.append(d or "")
-                            yield f"event: response.output_text.delta\ndata: {json.dumps({'delta': d or ''}, ensure_ascii=False)}\n\n".encode("utf-8")
-                        elif t == "response.output_text.done":
-                            txt = getattr(ev, "text", "")
-                            yield f"event: response.output_text.done\ndata: {json.dumps({'text': txt}, ensure_ascii=False)}\n\n".encode("utf-8")
-
-                    final_answer = "".join(text_buf).strip()
-                    openai_messages.append({"role": "assistant", "content": final_answer})
-                    keep_reasoning = False
+                # Completion
+                if t == "response.completed":
                     break
 
             # If a tool was called, continue loop (no streaming text yet)
             if tool_called_this_turn:
                 continue
 
-        if final_answer == "":
-            final_answer = (
+        if ctx.final_answer == "":
+            ctx.final_answer = (
                 "No pude completar el razonamiento completo para contestar su pregunta. "
                 "¿Te parece bien que resuma los resultados encontrados hasta ahora?"
             )
 
-        inline_occurrences = extract_inline_citations(final_answer)
+        inline_occurrences = extract_inline_citations(ctx.final_answer)
 
         completed_payload = {
-            "answer": final_answer,
-            "title": title,
-            "citations": dedupe_citations(citations),
+            "answer": ctx.final_answer,
+            "title": ctx.title,
+            "citations": dedupe_citations(ctx.citations),
             "inline_citations": inline_occurrences,
-            "trace_len": len(openai_messages),
-            "trace": trace,
-            "agent_state": json.dumps(openai_messages),
+            "trace_len": len(ctx.openai_messages),
+            "trace": ctx.trace,
+            "agent_state": json.dumps(ctx.openai_messages),
         }
 
         # Final summary event (mirrors your non-stream return payload)
