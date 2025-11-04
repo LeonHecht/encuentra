@@ -1015,7 +1015,7 @@ async def chat_agentic_stream(req: AgenticChatRequest):
                 # clip result to prevent context balooning (cost management)
                 result = clip(str(result))
 
-                print(f"🛠️ **Tool {tool_name} returned result (start): {result[:400]}**")
+                print(f"🛠️ **Tool {tool_name} returned result (start): {result}**")
 
                 # Append tool call and observation to messages for next iteration
                 ctx.openai_messages.append({

@@ -61,7 +61,8 @@ export default function Chat() {
   const [currentChatId, setCurrentChatId] = useState<string | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
-  const useStreaming = true;
+  const abortRef = useRef<AbortController | null>(null);
+  const useStreaming: boolean = true;
 
   const token = (() => {
     try {
@@ -258,7 +259,7 @@ export default function Chat() {
         pushMessage("assistant", data.answer || "", data.citations || []);
     }
 
-    async function handleSubmitStream(trimmed: string) {
+  async function handleSubmitStream(trimmed: string) {
         const chatId = await ensureChat(trimmed.slice(0, 60));
 
         // user message (UI + persist)
@@ -269,21 +270,36 @@ export default function Chat() {
         });
 
         // assistant placeholder (we'll stream into it)
-        const assistantId = pushAssistantPlaceholder();
-        setStatus("streaming");
+    const assistantId = pushAssistantPlaceholder();
+    // Prepare abort controller so we can cancel mid-stream
+    const controller = new AbortController();
+    abortRef.current = controller;
+    setStatus("streaming");
 
-        const res = await fetch(`${API_BASE}/v1/chat/agentic/stream`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
-            body: JSON.stringify({ space, messages: [{ role: "user", content: trimmed }], state: agentState || null }),
-        });
-        if (!res.ok || !res.body) {
-            throw new Error(`agentic/stream ${res.status}`);
-        }
+    let res: Response;
+    try {
+      res = await fetch(`${API_BASE}/v1/chat/agentic/stream`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+        body: JSON.stringify({ space, messages: [{ role: "user", content: trimmed }], state: agentState || null }),
+        signal: controller.signal,
+      });
+    } catch (err: any) {
+      if (err?.name === "AbortError") {
+        // User cancelled before response; just reset state
+        setStatus("ready");
+        abortRef.current = null;
+        return;
+      }
+      throw err;
+    }
+    if (!res.ok || !res.body) {
+      throw new Error(`agentic/stream ${res.status}`);
+    }
 
-        const reader = res.body.getReader();
-        const decoder = new TextDecoder();
-        let buffer = "";
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
 
         const handleFrame = async (event: string, dataStr: string) => {
             let payload: any = {};
@@ -338,49 +354,64 @@ export default function Chat() {
         };
 
         // basic SSE parsing: frames separated by \n\n, lines: "event: ..." and "data: ..."
-        while (true) {
-            const { done, value } = await reader.read();
-            if (done) break;
-            buffer += decoder.decode(value, { stream: true });
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
 
-            let sepIdx;
-            while ((sepIdx = buffer.indexOf("\n\n")) !== -1) {
-            const frame = buffer.slice(0, sepIdx);
-            buffer = buffer.slice(sepIdx + 2);
+        let sepIdx;
+        while ((sepIdx = buffer.indexOf("\n\n")) !== -1) {
+          const frame = buffer.slice(0, sepIdx);
+          buffer = buffer.slice(sepIdx + 2);
 
-            let evt: string | null = null;
-            let dataStr = "";
+          let evt: string | null = null;
+          let dataStr = "";
 
-            for (const line of frame.split("\n")) {
-                if (line.startsWith("event:")) evt = line.slice(6).trim();
-                else if (line.startsWith("data:")) dataStr += line.slice(5).trim();
-            }
-            if (evt) await handleFrame(evt, dataStr);
-            }
+          for (const line of frame.split("\n")) {
+            if (line.startsWith("event:")) evt = line.slice(6).trim();
+            else if (line.startsWith("data:")) dataStr += line.slice(5).trim();
+          }
+          if (evt) await handleFrame(evt, dataStr);
         }
-
-        // safety: if stream ended without response.completed, mark ready
-        setStatus("ready");
+      }
+    } catch (err: any) {
+      if (err?.name === "AbortError") {
+        // User-initiated cancellation; leave the partial assistant message as-is.
+      } else {
+        throw err;
+      }
+    } finally {
+      // safety: if stream ended (naturally or aborted) without response.completed, mark ready
+      setStatus("ready");
+      abortRef.current = null;
+    }
     }
 
-    async function handleSubmit() {
+  async function handleSubmit() {
         const trimmed = text.trim();
         if (!trimmed || status !== "ready") return;
 
         setStatus("submitted");
         try {
-            if (useStreaming) {
-            await handleSubmitStream(trimmed);
-            } else {
-            await handleSubmitNonStream(trimmed);
-            }
+      if (useStreaming) {
+        await handleSubmitStream(trimmed);
+      } else {
+        await handleSubmitNonStream(trimmed);
+      }
         } catch (err) {
             console.error("submit error", err);
             pushMessage("assistant", "Ocurrió un error procesando tu consulta.");
-        } finally {
-            if (useStreaming === false) setStatus("ready"); // streaming sets status itself
-        }
+    } finally {
+      if (!useStreaming) setStatus("ready"); // streaming sets status itself
     }
+    }
+
+  function stopStreaming() {
+  try {
+    abortRef.current?.abort();
+  } catch {}
+  }
 
   return (
     <SidebarProvider className="min-h-0 h-full w-full overflow-hidden">
@@ -471,8 +502,14 @@ export default function Chat() {
                 <PromptInputFooter>
                   <PromptInputTools />
                   <PromptInputSubmit
-                    disabled={!text || status === "submitted"}
+                    disabled={status === "submitted" || (status !== "streaming" && !text)}
                     status={status}
+                    onClick={(e) => {
+                      if (status === "streaming") {
+                        e.preventDefault();
+                        stopStreaming();
+                      }
+                    }}
                   />
                 </PromptInputFooter>
               </PromptInput>
