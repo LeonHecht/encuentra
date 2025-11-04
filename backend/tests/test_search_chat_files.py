@@ -75,7 +75,7 @@ def fake_openai(monkeypatch):
             self.output_text = text
 
     class FakeResponsesAPI:
-        def create(self, model, instructions, input, tools, parallel_tool_calls, reasoning):
+        def create(self, model, instructions, input, tools, parallel_tool_calls, tool_choice, max_tool_calls, reasoning, stream=None):
             # Return a one-shot assistant message so the loop exits
             return FakeResponse("Test answer")
 
