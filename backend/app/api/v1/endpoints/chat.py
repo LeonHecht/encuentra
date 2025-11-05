@@ -442,6 +442,7 @@ def get_title_for_chat(last_user_msg):
     return title
 
 def is_respond_fast(last_user_msg):
+    return False
     try:
         # print("\n📝 **Deciding if to respond fast**")
         response = client.responses.create(
@@ -461,7 +462,7 @@ def is_respond_fast(last_user_msg):
             # print("Could not decide; defaulting to full reasoning.")
             return False
     except Exception as e:
-        print(f"[title] generation failed: {e}")
+        return False
         
 def run_tool(ctx: AgentContext, tool_name, tool_args) -> str:
     """ do before: tool_args = json.loads(item.arguments) """
