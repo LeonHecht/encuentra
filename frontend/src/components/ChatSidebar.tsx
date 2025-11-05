@@ -1,6 +1,8 @@
 import { useEffect, useState, useCallback } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { MoreVertical } from "lucide-react";
 
 import {
   Sidebar,
@@ -12,7 +14,25 @@ import {
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
+  SidebarMenuAction,
 } from "@/components/ui/sidebar"
+
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+} from "@/components/ui/dropdown-menu"
+
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+  DialogClose,
+} from "@/components/ui/dialog"
 
 type Chat = {
   id: string;
@@ -36,6 +56,13 @@ export default function ChatSidebar({
 }: ChatSidebarProps) {
   const [chats, setChats] = useState<Chat[]>([]);
   const [loading, setLoading] = useState(false);
+  // Rename dialog state
+  const [renameOpen, setRenameOpen] = useState(false);
+  const [renameTarget, setRenameTarget] = useState<Chat | null>(null);
+  const [renameValue, setRenameValue] = useState("");
+  // Delete confirm dialog state
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<Chat | null>(null);
 
   const fetchChats = useCallback(async () => {
     setLoading(true);
@@ -165,6 +192,53 @@ export default function ChatSidebar({
     }
   }, [onCreated, onSelect]);
 
+  const openRename = (chat: Chat) => {
+    setRenameTarget(chat);
+    setRenameValue(chat.title || "");
+    setRenameOpen(true);
+  };
+
+  const saveRename = async () => {
+    if (!renameTarget) return;
+    const newTitle = renameValue.trim() || "Sin título";
+    const { error } = await supabase
+      .from("chats")
+      .update({ title: newTitle })
+      .eq("id", renameTarget.id);
+    if (!error) {
+      setChats((prev) =>
+        prev.map((c) => (c.id === renameTarget.id ? { ...c, title: newTitle } : c))
+      );
+      try {
+        window.dispatchEvent(
+          new CustomEvent("chat:updated", { detail: { id: renameTarget.id, title: newTitle } })
+        );
+      } catch {}
+      setRenameOpen(false);
+      setRenameTarget(null);
+    }
+  };
+
+  const openDelete = (chat: Chat) => {
+    setDeleteTarget(chat);
+    setDeleteOpen(true);
+  };
+
+  const confirmDelete = async () => {
+    if (!deleteTarget) return;
+    const id = deleteTarget.id;
+    // Best-effort: delete messages first to avoid FK constraint issues, then the chat
+    try {
+      await supabase.from("chat_messages").delete().eq("chat_id", id);
+    } catch {}
+    const { error } = await supabase.from("chats").delete().eq("id", id);
+    if (!error) {
+      setChats((prev) => prev.filter((c) => c.id !== id));
+      setDeleteOpen(false);
+      setDeleteTarget(null);
+    }
+  };
+
   return (
     <Sidebar
       className={className}
@@ -200,6 +274,30 @@ export default function ChatSidebar({
                   >
                     <span className="truncate">{c.title || "Sin título"}</span>
                   </SidebarMenuButton>
+                  {/* Actions */}
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <SidebarMenuAction
+                        showOnHover
+                        onClick={(e) => e.stopPropagation()}
+                        aria-label="Opciones"
+                      >
+                        <MoreVertical className="size-4" />
+                      </SidebarMenuAction>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end" className="w-44">
+                      <DropdownMenuItem onSelect={() => openRename(c)}>
+                        Renombrar
+                      </DropdownMenuItem>
+                      <DropdownMenuSeparator />
+                      <DropdownMenuItem
+                        onSelect={() => openDelete(c)}
+                        className="text-red-600 focus:text-red-700"
+                      >
+                        Eliminar
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
                 </SidebarMenuItem>
               ))}
               {chats.length === 0 && !loading && (
@@ -211,6 +309,49 @@ export default function ChatSidebar({
           </SidebarGroupContent>
         </SidebarGroup>
       </SidebarContent>
+
+      {/* Rename Dialog */}
+      <Dialog open={renameOpen} onOpenChange={setRenameOpen}>
+        <DialogContent onOpenAutoFocus={(e) => e.preventDefault()}>
+          <DialogHeader>
+            <DialogTitle>Cambiar título del chat</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-2">
+            <Input
+              value={renameValue}
+              onChange={(e) => setRenameValue(e.target.value)}
+              placeholder="Nuevo título"
+              autoFocus
+            />
+          </div>
+          <DialogFooter className="gap-2 sm:gap-0">
+            <DialogClose asChild>
+              <Button variant="outline">Cancelar</Button>
+            </DialogClose>
+            <Button onClick={saveRename}>Guardar</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Delete Confirm Dialog */}
+      <Dialog open={deleteOpen} onOpenChange={setDeleteOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Eliminar chat</DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            ¿Seguro que quieres eliminar este chat? Esta acción no se puede deshacer.
+          </p>
+          <DialogFooter className="gap-2 sm:gap-0">
+            <DialogClose asChild>
+              <Button variant="outline">Cancelar</Button>
+            </DialogClose>
+            <Button variant="destructive" onClick={confirmDelete}>
+              Eliminar
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </Sidebar>
   );
 }
