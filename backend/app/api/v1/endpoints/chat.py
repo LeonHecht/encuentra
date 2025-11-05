@@ -426,6 +426,7 @@ def extract_inline_citations(text: str):
 
 def get_title_for_chat(last_user_msg):
     try:
+        # print("\n📝 **Generating Chat Title**")
         response = client.responses.create(
             model="gpt-4.1-nano",
             instructions="Given this user's request, give the Chat a title that will be shown in the list of chats. Return a string of max 5 words. Don't return any additional content, just the title.",
@@ -434,6 +435,7 @@ def get_title_for_chat(last_user_msg):
         )
         raw_title = response.output_text
         title = normalize_title(raw_title, last_user_msg)
+        # print(f"Generated title: {title}")
     except Exception as e:
         print(f"[title] generation failed: {e}")
         title = normalize_title("", last_user_msg)
@@ -531,7 +533,7 @@ def run_tool(ctx: AgentContext, tool_name, tool_args) -> str:
         result = "Unknown tool"
 
     return result
-    
+
 def dedupe_citations(cites: list[dict]) -> list[dict]:
     seen = set(); out=[]
     for c in cites:
@@ -626,13 +628,13 @@ async def chat_agentic_stream(req: AgenticChatRequest):
 
         while ctx.keep_reasoning and ctx.iteration_count < cfg.max_iterations:
             ctx.iteration_count += 1
-            print(f"\n🔄 **Reasoning Iteration {ctx.iteration_count}**")
+            # print(f"\n🔄 **Reasoning Iteration {ctx.iteration_count}**")
 
-            extra_finalize_note = (
-                "You have reached the maximum reasoning iterations. "
-                "Do NOT call more tools. Produce the final answer now. If you still couldn't gather enough information, state that clearly in your answer. It is better to be honest than to invent information."
-            )
             if ctx.iteration_count == cfg.max_iterations:
+                extra_finalize_note = (
+                    "You have reached the maximum reasoning iterations. "
+                    "Do NOT call more tools. Produce the final answer now. If you still couldn't gather enough information, state that clearly in your answer. It is better to be honest than to invent information."
+                )
                 final_instructions = f"{cfg.system_prompt}\n\n[control] {extra_finalize_note}"
             else:
                 final_instructions = cfg.system_prompt
