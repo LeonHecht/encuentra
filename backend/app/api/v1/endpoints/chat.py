@@ -46,6 +46,8 @@ class AgenticChatRequest(BaseModel):
 router = APIRouter()
 client = OpenAI()
 
+FAST_SYS_PROMPT = """You are a helpful legal assistant for LATAM. Default to the user's language."""
+
 SYSTEM_PROMPT_V1 = """
 You are a precise, citation-driven legal assistant.
 Default to the user’s language. If the user writes in Spanish, answer in Spanish.
@@ -426,10 +428,10 @@ def get_title_for_chat(last_user_msg):
     try:
         # print("\n📝 **Generating Chat Title**")
         response = client.responses.create(
-            model="gpt-5-nano",
+            model="gpt-4.1-nano",
             instructions="Given this user's request, give the Chat a title that will be shown in the list of chats. Return a string of max 5 words. Don't return any additional content, just the title.",
             input=[{"role": "user", "content": last_user_msg[:200]}],
-            reasoning={"effort": "low"},
+            # reasoning={"effort": "low"},
         )
         raw_title = response.output_text
         title = normalize_title(raw_title, last_user_msg)
@@ -439,6 +441,28 @@ def get_title_for_chat(last_user_msg):
         title = normalize_title("", last_user_msg)
     return title
 
+def is_respond_fast(last_user_msg):
+    try:
+        # print("\n📝 **Deciding if to respond fast**")
+        response = client.responses.create(
+            model="gpt-4.1-mini",
+            instructions="Determine whether the following user’s request can be answered directly from internal knowledge. If yes, respond 'yes'. If it requires complex reasoning or external case law lookup, respond 'no'.",
+            input=[{"role": "user", "content": f"User request:\n{last_user_msg}\nIf the request can be answered without searching case law or reasoning, return 'yes', else 'no'."}],
+            # reasoning={"effort": "low"},
+        )
+        # print("response:", response.output_text)
+        if "yes" in response.output_text.strip().lower():
+            # print("Decided to respond fast.")
+            return True
+        elif "no" in response.output_text:
+            # print("Decided to use full reasoning.")
+            return False
+        else:
+            # print("Could not decide; defaulting to full reasoning.")
+            return False
+    except Exception as e:
+        print(f"[title] generation failed: {e}")
+        
 def run_tool(ctx: AgentContext, tool_name, tool_args) -> str:
     """ do before: tool_args = json.loads(item.arguments) """
     
@@ -560,6 +584,47 @@ async def chat_agentic_stream(req: AgenticChatRequest):
         async def emit(event: str, obj: dict):
             yield f"event: {event}\n".encode("utf-8")
             yield f"data: {json.dumps(obj, ensure_ascii=False)}\n\n".encode("utf-8")
+
+        if is_respond_fast(last_user_msg):
+            stream = client.responses.create(
+                model="gpt-4.1-mini",
+                instructions=FAST_SYS_PROMPT,
+                input=ctx.openai_messages,
+                stream=True,
+            )
+
+            # Local accumulator for this streamed turn
+            acc_text: list[str] = []
+
+            for ev in stream:
+                t = getattr(ev, "type", None)
+
+                # Output text
+                if t == "response.output_text.delta":
+                    d = getattr(ev, "delta", "") or ""
+                    acc_text.append(d)
+                    await asyncio.sleep(0)  # optional, helps flush
+                    async for chunk in emit("response.output_text.delta", {"step": ctx.iteration_count, "delta": d}):
+                        yield chunk
+                if t == "response.output_text.done":
+                    txt = getattr(ev, "text", "") or ""
+                    ctx.final_answer = txt or "".join(acc_text)
+                    await asyncio.sleep(0)  # optional, helps flush
+                    async for chunk in emit("response.output_text.done", {"step": ctx.iteration_count, "text": ctx.final_answer}):
+                        yield chunk
+
+                    if ctx.final_answer:
+                        ctx.openai_messages.append({
+                            "role": "assistant",
+                            "content": ctx.final_answer
+                        })
+                    ctx.keep_reasoning = False
+
+                # Completion
+                if t == "response.completed":
+                    pass
+
+            stream.close()
 
         while ctx.keep_reasoning and ctx.iteration_count < cfg.max_iterations:
             ctx.iteration_count += 1
