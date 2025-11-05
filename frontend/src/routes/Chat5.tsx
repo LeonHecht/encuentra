@@ -14,6 +14,8 @@ import {
 import { Message, MessageContent } from "@/components/ai-elements/message";
 import { Response } from "@/components/ai-elements/response";
 import MarkdownWithCitations from "@/components/MarkdownWithCitations";
+import { Reasoning, ReasoningTrigger, ReasoningContent } from "@/components/ai-elements/reasoning";
+import { Shimmer } from "@/components/ai-elements/shimmer";
 import {
   InlineCitation,
   InlineCitationText,
@@ -44,6 +46,8 @@ type ChatMsg = {
   role: "user" | "assistant";
   text: string;
   citations?: Array<{ doc_id: string; snippet?: string }>;
+  reasoning?: string[];
+  reasoningStreaming?: boolean;
 };
 
 export default function Chat() {
@@ -148,6 +152,8 @@ export default function Chat() {
           role: m.role,
           text: m.content as string,
           citations: m.meta?.citations || [],
+          reasoning: m.meta?.reasoning || [],
+          reasoningStreaming: false,
         }))
       );
     }
@@ -204,15 +210,18 @@ export default function Chat() {
 
   function pushAssistantPlaceholder() {
     const id = `${Date.now()}-assistant`;
-    setMessages((prev) => [...prev, { id, role: "assistant", text: "" }]);
+    setMessages((prev) => [
+      ...prev,
+      { id, role: "assistant", text: "", reasoning: [], reasoningStreaming: true },
+    ]);
     return id;
   }
 
   function appendAssistantDelta(assistantId: string, delta: string) {
     setMessages((prev) =>
-        prev.map((m) =>
-        m.id === assistantId ? { ...m, text: (m.text || "") + delta } : m
-        )
+      prev.map((m) =>
+      m.id === assistantId ? { ...m, text: (m.text || "") + delta } : m
+      )
     );
   }
 
@@ -221,6 +230,35 @@ export default function Chat() {
         prev.map((m) =>
         m.id === assistantId ? { ...m, text: fullText, citations: citations || [] } : m
         )
+    );
+  }
+
+  function addReasoningLine(assistantId: string, line: string) {
+    setMessages((prev) =>
+      prev.map((m) => {
+        if (m.id !== assistantId) return m;
+        const existing = m.reasoning || [];
+        if (existing.includes(line)) return m;
+        return { ...m, reasoning: [...existing, line], reasoningStreaming: true };
+      })
+    );
+  }
+
+  function setMessageReasoningStreaming(assistantId: string, streaming: boolean) {
+    setMessages((prev) => prev.map((m) => (m.id === assistantId ? { ...m, reasoningStreaming: streaming } : m)));
+  }
+
+  function finishReasoningNow(assistantId: string) {
+    // Mark reasoning as finished and set a duration immediately based on start time
+    setMessages((prev) =>
+      prev.map((m) => {
+        if (m.id !== assistantId) return m;
+        if (!m.reasoningStreaming) return m; // already finished
+        return {
+          ...m,
+          reasoningStreaming: false,
+        };
+      })
     );
   }
 
@@ -260,21 +298,25 @@ export default function Chat() {
     }
 
   async function handleSubmitStream(trimmed: string) {
-        const chatId = await ensureChat(trimmed.slice(0, 60));
+    const chatId = await ensureChat(trimmed.slice(0, 60));
 
-        // user message (UI + persist)
-        pushMessage("user", trimmed);
-        setText("");
-        await supabase.from("chat_messages").insert({
-            chat_id: chatId, role: "user", content: trimmed, meta: null,
-        });
+    // user message (UI + persist)
+    pushMessage("user", trimmed);
+    setText("");
+    await supabase.from("chat_messages").insert({
+        chat_id: chatId, role: "user", content: trimmed, meta: null,
+    });
 
-        // assistant placeholder (we'll stream into it)
+    // assistant placeholder (we'll stream into it)
     const assistantId = pushAssistantPlaceholder();
+    
     // Prepare abort controller so we can cancel mid-stream
     const controller = new AbortController();
     abortRef.current = controller;
     setStatus("streaming");
+    
+    // Local buffer to persist reasoning lines for this assistant turn
+    const reasoningBuf: string[] = [];
 
     let res: Response;
     try {
@@ -301,59 +343,70 @@ export default function Chat() {
     const decoder = new TextDecoder();
     let buffer = "";
 
-        const handleFrame = async (event: string, dataStr: string) => {
-            let payload: any = {};
-            try { payload = dataStr ? JSON.parse(dataStr) : {}; } catch {}
+    const handleFrame = async (event: string, dataStr: string) => {
+      let payload: any = {};
+      try { payload = dataStr ? JSON.parse(dataStr) : {}; } catch {}
 
-            switch (event) {
-            case "response.output_text.delta": {
-                const delta = payload.delta || "";
-                appendAssistantDelta(assistantId, delta);
-                break;
+      switch (event) {
+        case "response.emit_message": {
+          const msg = payload.msg || "Pensando";
+          // Attach emitted reasoning message to the current assistant message
+          addReasoningLine(assistantId, msg);
+          reasoningBuf.push(msg);
+                  break;
+        }
+        case "response.output_text.delta": {
+            const delta = payload.delta || "";
+            appendAssistantDelta(assistantId, delta);
+            // As soon as the assistant starts typing, stop thinking and show duration immediately
+            finishReasoningNow(assistantId);
+            break;
+        }
+        case "response.output_text.done": {
+            // optional: nothing; we’ll finalize on response.completed
+            break;
+        }
+        case "response.completed": {
+            const answer = payload.answer ?? "";
+            const citations = payload.citations ?? [];
+            const title = payload.title ?? "";
+            const newState = payload.agent_state ?? null;
+
+            finalizeAssistant(assistantId, answer, citations);
+
+            if (title) {
+                setTitle(title);
+                await supabase.from("chats").update({ title }).eq("id", chatId);
+                try { window.dispatchEvent(new CustomEvent("chat:updated", { detail: { id: chatId, title } })); } catch {}
             }
-            case "response.output_text.done": {
-                // optional: nothing; we’ll finalize on response.completed
-                break;
-            }
-            case "response.completed": {
-                const answer = payload.answer ?? "";
-                const citations = payload.citations ?? [];
-                const title = payload.title ?? "";
-                const newState = payload.agent_state ?? null;
-
-                finalizeAssistant(assistantId, answer, citations);
-
-                if (title) {
-                    setTitle(title);
-                    await supabase.from("chats").update({ title }).eq("id", chatId);
-                    try { window.dispatchEvent(new CustomEvent("chat:updated", { detail: { id: chatId, title } })); } catch {}
-                }
-                if (newState) {
-                    setAgentState(newState);
-                    await supabase.from("chats").update({ agent_state: newState }).eq("id", chatId);
-                }
-
-                await supabase.from("chat_messages").insert({
-                    chat_id: chatId, role: "assistant", content: answer, meta: { citations },
-                });
-
-                setStatus("ready");
-                break;
+            if (newState) {
+                setAgentState(newState);
+                await supabase.from("chats").update({ agent_state: newState }).eq("id", chatId);
             }
 
-            // (optional) show trace / reasoning in a side panel if you want:
-            case "reasoning.summary":
-            case "reasoning.text":
-            case "reasoning.summary_part":
-            case "tool.start":
-            case "tool.result":
-            case "trace":
-                // you can dispatch to a debug pane here
-                break;
-            }
-        };
+            await supabase.from("chat_messages").insert({
+                      chat_id: chatId, role: "assistant", content: answer, meta: { citations, reasoning: reasoningBuf },
+            });
 
-        // basic SSE parsing: frames separated by \n\n, lines: "event: ..." and "data: ..."
+            setStatus("ready");
+            // Streaming finished; allow Reasoning to auto-close for this message
+            setMessageReasoningStreaming(assistantId, false);
+            break;
+        }
+
+        // (optional) show trace / reasoning in a side panel if you want:
+        case "reasoning.summary":
+        case "reasoning.text":
+        case "reasoning.summary_part":
+        case "tool.start":
+        case "tool.result":
+        case "trace":
+            // you can dispatch to a debug pane here
+            break;
+        }
+    };
+
+    // basic SSE parsing: frames separated by \n\n, lines: "event: ..." and "data: ..."
     try {
       while (true) {
         const { done, value } = await reader.read();
@@ -385,27 +438,28 @@ export default function Chat() {
       // safety: if stream ended (naturally or aborted) without response.completed, mark ready
       setStatus("ready");
       abortRef.current = null;
+      // Ensure reasoning collapses if we didn't receive response.completed
+      setMessageReasoningStreaming(assistantId, false);
     }
-    }
+  }
 
   async function handleSubmit() {
-        const trimmed = text.trim();
-        if (!trimmed || status !== "ready") return;
-
-        setStatus("submitted");
-        try {
+    const trimmed = text.trim();
+    if (!trimmed || status !== "ready") return;
+    setStatus("submitted");
+    try {
       if (useStreaming) {
         await handleSubmitStream(trimmed);
       } else {
         await handleSubmitNonStream(trimmed);
       }
-        } catch (err) {
-            console.error("submit error", err);
-            pushMessage("assistant", "Ocurrió un error procesando tu consulta.");
+    } catch (err) {
+        console.error("submit error", err);
+        pushMessage("assistant", "Ocurrió un error procesando tu consulta.");
     } finally {
       if (!useStreaming) setStatus("ready"); // streaming sets status itself
     }
-    }
+  }
 
   function stopStreaming() {
   try {
@@ -464,6 +518,22 @@ export default function Chat() {
                     messages.map((m) => (
                       <Message key={m.id} from={m.role} data-message-id={m.id}>
                         <MessageContent>
+                          {m.role === "assistant" && m.reasoning && m.reasoning.length > 0 && (
+                            <div className="mb-3">
+                              <Reasoning
+                                isStreaming={!!m.reasoningStreaming}
+                                defaultOpen={!!m.reasoningStreaming}
+                              >
+                                <ReasoningTrigger />
+                                <ReasoningContent>{m.reasoning.join("\n\n")}</ReasoningContent>
+                              </Reasoning>
+                            </div>
+                          )}
+                          {m.role === "assistant" && status === "streaming" && (!m.reasoning || m.reasoning.length === 0) && (m.text ?? "") === "" && (
+                            <div className="mb-3 text-muted-foreground text-sm">
+                              <Shimmer duration={2} spread={4}>Iniciando…</Shimmer>
+                            </div>
+                          )}
                           {m.role === "assistant" ? (
                             <MarkdownWithCitations
                               className="prose prose-slate max-w-none"

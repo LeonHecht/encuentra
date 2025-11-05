@@ -22,8 +22,8 @@ const ShimmerComponent = ({
   children,
   as: Component = "p",
   className,
-  duration = 2,
-  spread = 2,
+  duration = 6,
+  spread = 4,
 }: TextShimmerProps) => {
   const MotionComponent = motion.create(
     Component as keyof JSX.IntrinsicElements
@@ -39,15 +39,17 @@ const ShimmerComponent = ({
       animate={{ backgroundPosition: "0% center" }}
       className={cn(
         "relative inline-block bg-[length:250%_100%,auto] bg-clip-text text-transparent",
-        "[--bg:linear-gradient(90deg,#0000_calc(50%-var(--spread)),var(--color-background),#0000_calc(50%+var(--spread)))] [background-repeat:no-repeat,padding-box]",
+        // Use theme vars from index.css: --background is HSL components -> wrap with hsl(var(--background))
+        "[--bg:linear-gradient(90deg,#0000_calc(50%-var(--spread)),hsl(var(--background)),#0000_calc(50%+var(--spread)))] [background-repeat:no-repeat,padding-box]",
         className
       )}
       initial={{ backgroundPosition: "100% center" }}
       style={
         {
           "--spread": `${dynamicSpread}px`,
+          // muted-foreground is also HSL components
           backgroundImage:
-            "var(--bg), linear-gradient(var(--color-muted-foreground), var(--color-muted-foreground))",
+            "var(--bg), linear-gradient(hsl(var(--muted-foreground)), hsl(var(--muted-foreground)))",
         } as CSSProperties
       }
       transition={{
