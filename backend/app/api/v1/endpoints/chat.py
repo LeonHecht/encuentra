@@ -942,20 +942,10 @@ async def chat_agentic_stream(req: AgenticChatRequest):
 
                 # Reasoning (UI)
                 if t == "response.reasoning_summary_text.delta":
-                    d = getattr(ev, "delta", "") or ""
-                    await asyncio.sleep(0)  # optional, helps flush
-                    async for chunk in emit("reasoning.summary", {"step": ctx.iteration_count, "delta": d}):
-                        yield chunk
+                    pass
                 if t == "response.reasoning_text.delta":
-                    d = getattr(ev, "delta", "") or ""
-                    await asyncio.sleep(0)  # optional, helps flush
-                    async for chunk in emit("reasoning.text", {"step": ctx.iteration_count, "delta": d}):
-                        yield chunk
+                    pass
                 if t == "response.reasoning_summary_part.added":
-                    # p = getattr(ev, "part", "") or ""
-                    # await asyncio.sleep(0)  # optional, helps flush
-                    # async for chunk in emit("reasoning.summary_part", {"step": ctx.iteration_count, "part": p}):
-                    #     yield chunk
                     pass
 
                 # Function tools
@@ -965,10 +955,29 @@ async def chat_agentic_stream(req: AgenticChatRequest):
                         final_tool_calls[index].arguments += ev.delta
 
                 if t == "response.function_call_arguments.done":
-                    # tool_name = getattr(ev, "name") or ""
-                    # tool_args = json.loads(getattr(ev, "arguments")) or []
-                    # call_id = getattr(ev, "item_id")
+                    index = ev.output_index
+                    tool_call = final_tool_calls[index]
+                    tool_name = getattr(tool_call, "name")
+                    tool_args = json.loads(getattr(tool_call, "arguments"))
+
+                    if tool_name == "emit_event":
+                        msg = tool_args.get("message", "Pensando")
+                    elif tool_name == "search_cases":
+                        query = tool_args.get("query", "[Consulta no disponible.]")
+                        msg = f"Buscando documentos relevantes a la siguiente consulta: {query}..."
+                    elif tool_name == "fetch_passages":
+                        msg = "Recuperando pasajes relevantes..."
+                    elif tool_name == "fetch_document":
+                        msg = "Recuperando documentos relevantes..."
+                    else:
+                        break
+                    
+                    await asyncio.sleep(0)  # optional, helps flush
+                    async for chunk in emit("response.emit_message", {"step": ctx.iteration_count, "msg": msg}):
+                        yield chunk
+                    
                     break
+                
                 # Output text
                 if t == "response.output_text.delta":
                     d = getattr(ev, "delta", "") or ""
