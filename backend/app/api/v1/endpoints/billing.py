@@ -88,3 +88,34 @@ def create_billing_portal_session(user: UserData = Depends(get_current_user)):
         raise HTTPException(status_code=500, detail=f"Failed to create billing portal session: {e}")
 
     return {"url": session["url"]}
+
+
+@router.get("/billing/status")
+def get_billing_status(user: UserData = Depends(get_current_user)):
+    """Return the user's current subscription tier as tracked in payment_accounts.
+
+    Response shape: { "subscription_tier": "free|pro|team|enterprise", "provider": "stripe" }
+    Defaults to tier "free" if no payment account exists.
+    """
+    try:
+        sb = get_supabase()
+        resp = (
+            sb.table("payment_accounts")
+            .select("subscription_tier, provider")
+            .eq("user_id", user.user_id)
+            .eq("provider", "stripe")
+            .limit(1)
+            .execute()
+        )
+        if resp.data:
+            row = resp.data[0]
+            tier = row.get("subscription_tier") or "free"
+            provider = row.get("provider") or "stripe"
+        else:
+            tier = "free"
+            provider = "stripe"
+        return {"subscription_tier": tier, "provider": provider}
+    except Exception as e:
+        # On error, don't block UI; degrade gracefully
+        print(f"get_billing_status error: {e}")
+        return {"subscription_tier": "free", "provider": "stripe"}
