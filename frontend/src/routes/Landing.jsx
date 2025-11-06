@@ -39,13 +39,13 @@ export default function Landing() {
         <div className="flex gap-4">
           <Link
             to="/search"
-            className="px-8 py-3 bg-black text-white rounded-3xl hover:bg-gray-800 transition"
+            className="px-8 py-3 bg-black text-white rounded-full hover:bg-gray-800 transition"
           >
             Buscar
           </Link>
           <Link
             to="/chat"
-            className="px-8 py-3 bg-gray-200 text-gray-900 rounded-3xl hover:bg-gray-300 transition"
+            className="px-8 py-3 bg-gray-200 text-gray-900 rounded-full hover:bg-gray-300 transition"
           >
             Chat
           </Link>

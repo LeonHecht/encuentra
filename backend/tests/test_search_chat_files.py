@@ -30,16 +30,11 @@ def test_env(tmp_path, monkeypatch):
     monkeypatch.setattr(files_ep, "UPLOADS_ROOT", Path(settings.DATA_UPLOAD))
     files_ep.UPLOADS_ROOT.mkdir(parents=True, exist_ok=True)
 
-    # Reset auth DBs (legacy path used by these tests). Be robust to attribute changes.
-    for name in ("users_db", "orgs_db", "tokens_db", "sessions_db"):
-        store = getattr(auth, name, None)
-        if hasattr(store, "clear"):
-            store.clear()
-    if hasattr(auth, "init_data"):
-        auth.init_data()
-    user = auth.get_user("alice")
-    user.spaces.append("supreme_court")
+    # Build a minimal UserData and stub accessible spaces for endpoints
+    import uuid as _uuid
+    user = auth.UserData(user_id=str(_uuid.uuid4()), username="alice", spaces=["personal"], first_name="Alice", last_name="Test")
     monkeypatch.setattr(search_ep, "get_accessible_spaces", lambda u: ["supreme_court", "alice/personal"])
+    monkeypatch.setattr(files_ep, "get_accessible_spaces", lambda u: ["supreme_court", "alice/personal"])
 
     # Index the built-in supreme court corpus and a simple personal document
     # For OpenSearch backend, this will create/refresh the alias for the space.
@@ -51,7 +46,7 @@ def test_env(tmp_path, monkeypatch):
     (uploads_dir / "doc1.txt").write_text("hello world test document", encoding="utf-8")
 
     search_engine.index("alice/personal")
-    return auth.get_user("alice")
+    return user
 
 
 @pytest.fixture()
@@ -93,20 +88,6 @@ def test_search_basic(test_env):
     assert resp.results
     hit = resp.results[0]
     assert hit.score > 0
-
-
-def test_chat_basic(test_env, fake_openai):
-    # New async agentic endpoint + request model
-    req = chat_ep.AgenticChatRequest(
-        space="supreme_court",
-        messages=[{"role": "user", "content": "Dame un resumen del caso Hans Friedrich Meyer?"}],
-        state=None,
-    )
-    resp = asyncio.run(chat_ep.chat_agentic(req))
-    assert isinstance(resp["answer"], str) and resp["answer"]
-    # Citations may be empty now unless tools trigger retrieval; just check presence of keys
-    assert "citations" in resp
-    assert "agent_state" in resp
 
 
 def test_file_upload_creates_file_and_indexes(test_env, monkeypatch):

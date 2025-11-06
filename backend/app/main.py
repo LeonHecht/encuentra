@@ -8,7 +8,8 @@ from .services.search import search_engine
 from .api.v1.endpoints import files
 from .api.v1.endpoints import chat
 from .api.v1.endpoints import auth
-from .services import auth as auth_service
+from .api.v1.endpoints import billing
+from .api.v1.endpoints import billing
 
 
 app = FastAPI(
@@ -28,6 +29,8 @@ app.include_router(search.router, prefix=f"/{settings.API_VERSION}")
 app.include_router(files.router, prefix=f"/{settings.API_VERSION}")
 app.include_router(chat.router, prefix=f"/{settings.API_VERSION}")
 app.include_router(auth.router, prefix=f"/{settings.API_VERSION}")
+app.include_router(billing.router, prefix=f"/{settings.API_VERSION}")
+app.include_router(billing.router, prefix=f"/{settings.API_VERSION}")
 
 static_dir = Path(__file__).resolve().parent / "static" / "downloads"
 app.mount("/downloads", StaticFiles(directory=static_dir), name="downloads")
@@ -39,7 +42,6 @@ def ping():
 # indexamos una sola vez al startup
 @app.on_event("startup")
 def on_startup():
-    auth_service.init_data()
     search_engine.index(space="supreme_court")
     uploads_root = Path(settings.DATA_UPLOAD)
     if uploads_root.exists():

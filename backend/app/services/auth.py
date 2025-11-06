@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional
+from typing import List, Optional
 from supabase import create_client, Client
 from pathlib import Path
 from threading import Lock
@@ -26,62 +26,25 @@ def get_supabase() -> Client:
     return _supabase_client
 
 
-# Spaces that are accessible to all users
 PUBLIC_SPACES = ["supreme_court"]
+
 @dataclass
 class UserData:
-    username: str
-    password: str
+    """Represents the authenticated user context derived from Supabase.
+
+    Fields:
+        user_id: Supabase auth.users UUID (sub claim)
+        username: Email (kept for backward compatibility with existing code that expects `username`)
+        first_name / last_name: From JWT user_metadata if present
+        spaces: Names of personal spaces already indexed (not authoritative; convenience only)
+        organization: Single org UUID if membership exists (simplified)
+    """
+    user_id: str
+    username: str  # email
     first_name: str = ""
     last_name: str = ""
     spaces: List[str] = field(default_factory=list)
     organization: Optional[str] = None
-
-@dataclass
-class OrgData:
-    name: str
-    spaces: List[str] = field(default_factory=list)
-    members: List[str] = field(default_factory=list)
-
-users_db: Dict[str, UserData] = {}
-orgs_db: Dict[str, OrgData] = {}
-
-
-def user_exists(username: str) -> bool:
-    """Return True if *username* is present in the in-memory DB.
-    
-    NOTE: With Supabase, user existence is handled by Supabase Auth.
-    This function is kept for backward compatibility but may not be needed.
-    """
-    return username in users_db
-
-
-# DEPRECATED: Supabase handles user registration
-# Keeping for backward compatibility, but should migrate to Supabase
-def register_user(username: str, password: str, first_name: str = "", last_name: str = "") -> UserData:
-    """Create a new user and return the created ``UserData``.
-
-    Raises ``ValueError`` if the user already exists.
-    """
-    if username in users_db:
-        raise ValueError("User already exists")
-
-    user = UserData(
-        username=username,
-        password=password,
-        first_name=first_name,
-        last_name=last_name,
-        spaces=["personal"],
-    )
-    users_db[username] = user
-    # create upload directory for the personal space
-    Path(settings.DATA_UPLOAD, username, "personal").mkdir(parents=True, exist_ok=True)
-    return user
-
-
-def get_user(username: str) -> Optional[UserData]:
-    """Return ``UserData`` for *username* or ``None``."""
-    return users_db.get(username)
 
 
 def get_or_create_user_from_supabase(user_id: str, email: str, user_metadata: Optional[dict] = None) -> UserData:
@@ -115,8 +78,8 @@ def get_or_create_user_from_supabase(user_id: str, email: str, user_metadata: Op
             organization = org_membership.data[0]["org_id"] if org_membership.data else None
             
             return UserData(
+                user_id=user_id,
                 username=email,
-                password="",  # Not needed with Supabase
                 first_name=user_metadata.get("first_name", "") if user_metadata else "",
                 last_name=user_metadata.get("last_name", "") if user_metadata else "",
                 spaces=space_names,
@@ -146,8 +109,8 @@ def get_or_create_user_from_supabase(user_id: str, email: str, user_metadata: Op
             print(f"✅ User profile created for {email}")
             
             return UserData(
+                user_id=user_id,
                 username=email,
-                password="",
                 first_name=user_metadata.get("first_name", "") if user_metadata else "",
                 last_name=user_metadata.get("last_name", "") if user_metadata else "",
                 spaces=["personal"],
@@ -158,76 +121,64 @@ def get_or_create_user_from_supabase(user_id: str, email: str, user_metadata: Op
         raise ValueError(f"Failed to get or create user: {str(e)}")
     
 
-def init_data() -> None:
-    """Initialize a few demo users and organizations."""
-    if users_db:
-        return
+def get_accessible_spaces(user: UserData) -> List[str]:
+    """Return a list of space identifiers the user can access.
 
-    org = OrgData(name="demo_org", spaces=["shared"])
-    orgs_db[org.name] = org
-
-    user = UserData(username="alice", password="alice", spaces=["personal"], organization=org.name)
-    users_db[user.username] = user
-    org.members.append(user.username)
-
-    for space in user.spaces:
-        Path(settings.DATA_UPLOAD, user.username, space).mkdir(parents=True, exist_ok=True)
-    for space in org.spaces:
-        Path(settings.DATA_UPLOAD, org.name, space).mkdir(parents=True, exist_ok=True)
-
-
-def authenticate(username: str, password: str) -> Optional[str]:
-    """DEPRECATED: Authentication is now handled by Supabase.
-    
-    This function is kept for backward compatibility but should not be used
-    with Supabase auth. Instead, validate Supabase JWT tokens.
+    Format matches existing frontend expectations:
+        - Public spaces: "supreme_court" (no slash)
+        - Personal spaces: "<email>/<space_name>"
+        - Org spaces: "<org_id>/<space_name>" (can later be swapped to org name)
     """
-    # This function is no longer used with Supabase auth
-    # Keeping it here to avoid breaking existing code during migration
-    return None
+    try:
+        sb = get_supabase()
+        # Personal spaces owned by the user
+        owned_resp = sb.table("spaces").select("name").eq("owner_id", user.user_id).execute()
+        personal = [f"{user.username}/{row['name']}" for row in owned_resp.data] if owned_resp.data else []
 
+        # Org membership -> fetch spaces for each org_id
+        org_spaces: List[str] = []
+        membership_resp = sb.table("members").select("org_id").eq("user_id", user.user_id).execute()
+        org_ids = [m["org_id"] for m in membership_resp.data] if membership_resp.data else []
+        if org_ids:
+            # For simplicity assume org_ids small; fetch spaces per org
+            for oid in org_ids:
+                s_resp = sb.table("spaces").select("name").eq("org_id", oid).execute()
+                if s_resp.data:
+                    org_spaces.extend([f"{oid}/{row['name']}" for row in s_resp.data])
 
-def get_accessible_spaces(username: str) -> List[str]:
-    user = users_db.get(username)
-    if not user:
-        print(f"WARNING: User {username} not found")
+        return list(dict.fromkeys(PUBLIC_SPACES + personal + org_spaces))  # preserve order, de-dup
+    except Exception as e:
+        print(f"get_accessible_spaces error: {e}")
         return PUBLIC_SPACES.copy()
-    print(f"DEGUB: User {username} found with spaces: {user.spaces}")
-    spaces = [f"{user.username}/{s}" for s in user.spaces]
-    if user.organization and user.organization in orgs_db:
-        spaces += [f"{user.organization}/{s}" for s in orgs_db[user.organization].spaces]
-    return PUBLIC_SPACES + spaces
 
 
-def create_user_space(username: str, name: str) -> str:
-    """Create a directory for *name* under the given user's upload space.
-    Reject ``name`` values containing path traversal characters and ensure the
-    directory is created inside ``settings.DATA_UPLOAD/<username>/``.
+def create_user_space(user: UserData, name: str) -> str:
+    """Create a new personal space for the user in Supabase and local FS.
+
+    Safeguards against traversal and ensures directory creation under DATA_UPLOAD/<email>/<space>.
+    Returns identifier '<email>/<space>'.
     """
-    # Reject dangerous names
     if any(token in name for token in ("..", "/", "\\")):
         raise ValueError("Invalid space name")
+    try:
+        sb = get_supabase()
+        # Insert space row (id auto-generated). Avoid duplicates.
+        existing = sb.table("spaces").select("name").eq("owner_id", user.user_id).eq("name", name).execute()
+        if not (existing.data and len(existing.data) > 0):
+            sb.table("spaces").insert({
+                "name": name,
+                "owner_id": user.user_id,
+                "is_public": False,
+            }).execute()
+        # local directory
+        uploads_root = Path(settings.DATA_UPLOAD) / user.username
+        space_dir = uploads_root / name
+        space_dir.mkdir(parents=True, exist_ok=True)
+        # Update in-memory convenience list (not authoritative)
+        if name not in user.spaces:
+            user.spaces.append(name)
+        return f"{user.username}/{name}"
+    except Exception as e:
+        raise ValueError(f"Failed to create space: {e}")
 
-    uploads_root = Path(settings.DATA_UPLOAD) / username
-    uploads_root.mkdir(parents=True, exist_ok=True)
-
-    space_dir = uploads_root / name
-
-    # Resolve paths to ensure the result stays within uploads_root
-    resolved_root = uploads_root.resolve()
-    resolved_dir = space_dir.resolve()
-    if not resolved_dir.is_relative_to(resolved_root):
-        raise ValueError("Invalid directory path")
-
-    resolved_dir.mkdir(parents=True, exist_ok=True)
-
-    # put the new personal space into the user profile
-    user = users_db.get(username)
-    if user and name not in user.spaces:
-        user.spaces.append(name)
-    # Return plain string "alice/newspace" instead of Path,
-    # because that's what the rest of the API expects.
-    return f"{username}/{name}"
-
-init_data()
 

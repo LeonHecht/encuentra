@@ -1,22 +1,17 @@
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 import uuid
 
 import pytest
 
 from backend.app.core.config import settings
 import backend.app.services.auth as auth
-from backend.app.core.security import tokens_db
 
 
 @pytest.fixture()
 def auth_env(tmp_path, monkeypatch):
-    """Reset in-memory databases and prepare temp upload directory."""
+    """Prepare temp upload directory for tests relying on local FS side effects."""
     monkeypatch.setattr(settings, "DATA_UPLOAD", str(tmp_path))
-    auth.users_db.clear()
-    auth.orgs_db.clear()
-    tokens_db.clear()
-    auth.init_data()
     return tmp_path
 
 
@@ -43,7 +38,7 @@ def mock_supabase(monkeypatch):
 
 
 # ============================================================================
-# Tests for new Supabase authentication
+# Tests for Supabase-based authentication helpers
 # ============================================================================
 
 def test_get_or_create_user_from_supabase_new_user(auth_env, mock_supabase):
@@ -101,15 +96,13 @@ def test_get_or_create_user_from_supabase_existing_user(auth_env, mock_supabase)
     mock_org_response.data = []
     
     # Setup mock to return different responses for different calls
-    def mock_execute(*args, **kwargs):
-        # First call: user_profiles query
-        if not hasattr(mock_execute, 'call_count'):
-            mock_execute.call_count = 0
-        mock_execute.call_count += 1
-        
-        if mock_execute.call_count == 1:
+    call_counter = {"n": 0}
+    def mock_execute(*_args, **_kwargs):
+        # Sequence: profile -> spaces -> org membership
+        call_counter["n"] += 1
+        if call_counter["n"] == 1:
             return mock_profile_response
-        elif mock_execute.call_count == 2:
+        elif call_counter["n"] == 2:
             return mock_spaces_response
         else:
             return mock_org_response
@@ -166,28 +159,64 @@ def test_get_or_create_user_from_supabase_with_org(auth_env, mock_supabase):
     assert user.organization == org_id
 
 
-# ============================================================================
-# Tests for legacy authentication (deprecated but kept for backward compat)
-# ============================================================================
-
-def test_authenticate_deprecated(auth_env):
-    """Test that deprecated authenticate() returns None."""
-    # authenticate() is now deprecated and returns None
-    token = auth.authenticate("alice", "alice")
-    assert token is None
-
-
 def test_get_accessible_spaces(auth_env):
     """Test getting accessible spaces for a user."""
-    spaces = auth.get_accessible_spaces("alice")
-    assert "alice/personal" in spaces
+    # Build user and mock Supabase responses
+    user = auth.UserData(user_id=str(uuid.uuid4()), username="alice@example.com", spaces=["personal"]) 
+    mock_client = MagicMock()
+    # Owned spaces
+    owned_resp = MagicMock(); owned_resp.data = [{"name": "personal"}]
+    # Membership in one org, id "demo_org"
+    members_resp = MagicMock(); members_resp.data = [{"org_id": "demo_org"}]
+    # Org spaces for that org
+    org_spaces_resp = MagicMock(); org_spaces_resp.data = [{"name": "shared"}]
+
+    # Create stable table mocks so repeated calls return the same object/state
+    spaces_table = MagicMock()
+    members_table = MagicMock()
+
+    # For spaces: first execute -> owned, second execute -> org spaces
+    spaces_table.select.return_value.eq.return_value.execute.side_effect = [owned_resp, org_spaces_resp]
+    # For members: single execute returns membership
+    members_table.select.return_value.eq.return_value.execute.return_value = members_resp
+
+    def table_side_effect(name):
+        if name == "spaces":
+            return spaces_table
+        if name == "members":
+            return members_table
+        t = MagicMock()
+        r = MagicMock(); r.data = []
+        t.select.return_value.eq.return_value.execute.return_value = r
+        return t
+
+    mock_client.table.side_effect = table_side_effect
+    # Patch get_supabase to return our fake client
+    from backend.app.services import auth as auth_mod
+    old_get = auth_mod.get_supabase
+    auth_mod.get_supabase = lambda: mock_client
+    try:
+        spaces = auth.get_accessible_spaces(user)
+    finally:
+        auth_mod.get_supabase = old_get
+
+    assert "alice@example.com/personal" in spaces
     assert "demo_org/shared" in spaces
-    assert "supreme_court" in spaces  # Public space
+    assert "supreme_court" in spaces
 
 
-def test_create_user_space_valid(auth_env):
+def test_create_user_space_valid(auth_env, monkeypatch):
     """Test creating a valid user space."""
-    space_key = auth.create_user_space("alice", "newspace")
+    user = auth.UserData(user_id=str(uuid.uuid4()), username="alice", spaces=["personal"])
+    # No-op Supabase insert (we're testing FS side effect only)
+    mock_client = MagicMock()
+    mock_table = MagicMock()
+    mock_client.table.return_value = mock_table
+    mock_table.select.return_value.eq.return_value.execute.return_value.data = []
+    mock_table.insert.return_value.execute.return_value.data = [{"name": "newspace"}]
+    monkeypatch.setattr(auth, "get_supabase", lambda: mock_client)
+
+    space_key = auth.create_user_space(user, "newspace")
     expected = Path(settings.DATA_UPLOAD) / "alice" / "newspace"
     assert expected.exists() and expected.is_dir()
     assert space_key == "alice/newspace"
@@ -195,34 +224,11 @@ def test_create_user_space_valid(auth_env):
 
 def test_create_user_space_invalid(auth_env):
     """Test that invalid space names are rejected."""
+    user = auth.UserData(user_id=str(uuid.uuid4()), username="alice")
     with pytest.raises(ValueError, match="Invalid space name"):
-        auth.create_user_space("alice", "../bad")
+        auth.create_user_space(user, "../bad")
     with pytest.raises(ValueError, match="Invalid space name"):
-        auth.create_user_space("alice", "bad/name")
+        auth.create_user_space(user, "bad/name")
     with pytest.raises(ValueError, match="Invalid space name"):
-        auth.create_user_space("alice", "bad\\name")
-
-
-def test_user_exists_and_get_user(auth_env):
-    """Test user existence check and retrieval."""
-    assert auth.user_exists("alice")
-    assert not auth.user_exists("bob")
-    user = auth.get_user("alice")
-    assert user and user.username == "alice"
-
-
-def test_register_user(auth_env):
-    """Test registering a new user (legacy method)."""
-    new_user = auth.register_user("bob", "secret", "Bob", "Builder")
-    assert new_user.username == "bob"
-    assert new_user.first_name == "Bob"
-    assert auth.user_exists("bob")
-    # personal upload dir created
-    path = Path(settings.DATA_UPLOAD) / "bob" / "personal"
-    assert path.exists() and path.is_dir()
-
-
-def test_register_user_duplicate(auth_env):
-    """Test that registering a duplicate user raises an error."""
-    with pytest.raises(ValueError, match="User already exists"):
-        auth.register_user("alice", "pass")
+        auth.create_user_space(user, "bad\\name")
+    
