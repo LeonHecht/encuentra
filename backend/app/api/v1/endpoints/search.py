@@ -11,7 +11,7 @@ router = APIRouter()
 @router.get("/spaces")
 def list_spaces(user: UserData = Depends(get_current_user)):
     """Return available search spaces for the current user."""
-    return {"spaces": get_accessible_spaces(user.username)}
+    return {"spaces": get_accessible_spaces(user)}
 
 @router.get("/search", response_model=SearchResponse)
 def search(
@@ -21,7 +21,7 @@ def search(
     user: UserData = Depends(get_current_user),
 ):
     print(f"Received search query: '{q}' in space '{space}' with top_k={top_k}")
-    if space not in get_accessible_spaces(user.username):
+    if space not in get_accessible_spaces(user):
         raise HTTPException(403, detail="Space not accessible")
     if not search_engine.has_space(space):
         raise HTTPException(400, detail=f"Unknown space '{space}'")

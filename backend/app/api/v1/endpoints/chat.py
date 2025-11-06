@@ -442,24 +442,29 @@ def get_title_for_chat(last_user_msg):
     return title
 
 def is_respond_fast(last_user_msg):
-    return False
     try:
+        instruction = """
+You have the task to decide wether the user's request requires a reasoning model which has access to a legal cases database and is able to do advanced reasoning, or if a fast model without access to tools is enough.
+Return 'reasoning_model' if the user's request is complex and requires deep thinking.
+Also return 'reasoning_model' if the user's request requires external knowledge from a case law database. For example, if the user asks about case law, then return 'reasoning'.
+Return 'fast_model' if the user's request is rather simple or a general knowledge question not requiring external facts or data.
+"""
         # print("\n📝 **Deciding if to respond fast**")
         response = client.responses.create(
             model="gpt-4.1-mini",
-            instructions="Determine whether the following user’s request can be answered directly from internal knowledge. If yes, respond 'yes'. If it requires complex reasoning or external case law lookup, respond 'no'.",
-            input=[{"role": "user", "content": f"User request:\n{last_user_msg}\nIf the request can be answered without searching case law or reasoning, return 'yes', else 'no'."}],
+            instructions=instruction,
+            input=[{"role": "user", "content": f"User request:\n{last_user_msg}"}],
             # reasoning={"effort": "low"},
         )
         # print("response:", response.output_text)
-        if "yes" in response.output_text.strip().lower():
-            # print("Decided to respond fast.")
+        if "fast_model" in response.output_text.strip().lower():
+            print("Decided to respond fast.")
             return True
-        elif "no" in response.output_text:
-            # print("Decided to use full reasoning.")
+        elif "reasoning_model" in response.output_text.strip().lower():
+            print("Decided to use full reasoning.")
             return False
         else:
-            # print("Could not decide; defaulting to full reasoning.")
+            print("Could not decide; defaulting to full reasoning.")
             return False
     except Exception as e:
         return False
@@ -586,46 +591,46 @@ async def chat_agentic_stream(req: AgenticChatRequest):
             yield f"event: {event}\n".encode("utf-8")
             yield f"data: {json.dumps(obj, ensure_ascii=False)}\n\n".encode("utf-8")
 
-        if is_respond_fast(last_user_msg):
-            stream = client.responses.create(
-                model="gpt-4.1-mini",
-                instructions=FAST_SYS_PROMPT,
-                input=ctx.openai_messages,
-                stream=True,
-            )
+        # if is_respond_fast(last_user_msg):
+        #     stream = client.responses.create(
+        #         model="gpt-4.1-mini",
+        #         instructions=FAST_SYS_PROMPT,
+        #         input=ctx.openai_messages,
+        #         stream=True,
+        #     )
 
-            # Local accumulator for this streamed turn
-            acc_text: list[str] = []
+        #     # Local accumulator for this streamed turn
+        #     acc_text: list[str] = []
 
-            for ev in stream:
-                t = getattr(ev, "type", None)
+        #     for ev in stream:
+        #         t = getattr(ev, "type", None)
 
-                # Output text
-                if t == "response.output_text.delta":
-                    d = getattr(ev, "delta", "") or ""
-                    acc_text.append(d)
-                    await asyncio.sleep(0)  # optional, helps flush
-                    async for chunk in emit("response.output_text.delta", {"step": ctx.iteration_count, "delta": d}):
-                        yield chunk
-                if t == "response.output_text.done":
-                    txt = getattr(ev, "text", "") or ""
-                    ctx.final_answer = txt or "".join(acc_text)
-                    await asyncio.sleep(0)  # optional, helps flush
-                    async for chunk in emit("response.output_text.done", {"step": ctx.iteration_count, "text": ctx.final_answer}):
-                        yield chunk
+        #         # Output text
+        #         if t == "response.output_text.delta":
+        #             d = getattr(ev, "delta", "") or ""
+        #             acc_text.append(d)
+        #             await asyncio.sleep(0)  # optional, helps flush
+        #             async for chunk in emit("response.output_text.delta", {"step": ctx.iteration_count, "delta": d}):
+        #                 yield chunk
+        #         if t == "response.output_text.done":
+        #             txt = getattr(ev, "text", "") or ""
+        #             ctx.final_answer = txt or "".join(acc_text)
+        #             await asyncio.sleep(0)  # optional, helps flush
+        #             async for chunk in emit("response.output_text.done", {"step": ctx.iteration_count, "text": ctx.final_answer}):
+        #                 yield chunk
 
-                    if ctx.final_answer:
-                        ctx.openai_messages.append({
-                            "role": "assistant",
-                            "content": ctx.final_answer
-                        })
-                    ctx.keep_reasoning = False
+        #             if ctx.final_answer:
+        #                 ctx.openai_messages.append({
+        #                     "role": "assistant",
+        #                     "content": ctx.final_answer
+        #                 })
+        #             ctx.keep_reasoning = False
 
-                # Completion
-                if t == "response.completed":
-                    pass
+        #         # Completion
+        #         if t == "response.completed":
+        #             pass
 
-            stream.close()
+        #     stream.close()
 
         while ctx.keep_reasoning and ctx.iteration_count < cfg.max_iterations:
             ctx.iteration_count += 1

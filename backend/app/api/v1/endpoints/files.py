@@ -24,7 +24,7 @@ async def upload_file(
     files: list of UploadFile
     space: the name of the space (folder) under UPLOADS_ROOT
     """
-    if space not in get_accessible_spaces(user.username):
+    if space not in get_accessible_spaces(user):
         raise HTTPException(403, detail="Space not accessible")
     space_dir = UPLOADS_ROOT / space
     space_dir.mkdir(parents=True, exist_ok=True)

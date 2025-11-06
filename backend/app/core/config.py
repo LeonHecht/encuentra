@@ -44,4 +44,9 @@ class Settings(BaseSettings):
     SUPABASE_JWKS_URL: str | None = None  # For verifying JWT tokens with new ECC keys
     SUPABASE_JWT_SECRET: str | None = None  # Legacy HS256 shared secret
 
+    # --- Stripe (optional) ---
+    STRIPE_SECRET_KEY: str | None = None
+    BILLING_RETURN_URL: str | None = None  # e.g. http://localhost:5173/settings/billing
+    FRONTEND_BASE_URL: str | None = None   # Fallback for return URLs
+
 settings = Settings()

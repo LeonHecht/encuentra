@@ -44,14 +44,14 @@ def get_user_info(user: UserData = Depends(get_current_user)):
 @router.get("/user/spaces")
 def list_user_spaces(user: UserData = Depends(get_current_user)):
     """List all spaces accessible to the current user."""
-    return {"spaces": get_accessible_spaces(user.username)}
+    return {"spaces": get_accessible_spaces(user)}
 
 
 @router.post("/user/spaces")
 def create_space(req: SpaceCreateRequest, user: UserData = Depends(get_current_user)):
-    """Create a new space for the current user."""
+    """Create a new personal space for the current user."""
     try:
-        space_key = create_user_space(user.username, req.name)
+        space_key = create_user_space(user, req.name)
     except ValueError as e:
         raise HTTPException(400, detail=str(e))
     search_engine.index(str(space_key))
