@@ -10,6 +10,7 @@ export default function Navbar() {
   const navigate = useNavigate();
   const [open, setOpen] = useState(false);
   const menuRef = useRef(null);
+  const [tier, setTier] = useState("free");
 
   // const firstName = user?.user_metadata?.first_name
   // console.log("first", firstName);
@@ -57,6 +58,24 @@ export default function Navbar() {
     };
   }, [open]);
 
+  // Fetch subscription tier
+  useEffect(() => {
+    let active = true;
+    async function fetchTier() {
+      if (!user) return setTier("free");
+      try {
+        const { useApi } = await import('../hooks/useApi.jsx');
+        const res = await useApi('billing/status');
+        if (!active) return;
+        setTier(res?.subscription_tier || 'free');
+      } catch (e) {
+        if (active) setTier('free');
+      }
+    }
+    fetchTier();
+    return () => { active = false; };
+  }, [user?.id]);
+
   async function handleLogout() {
     try {
       // Clear any legacy token used by API
@@ -95,18 +114,40 @@ export default function Navbar() {
                 {initial?.toUpperCase()}
               </button>
               {open && (
-                <div className="absolute right-0 mt-2 w-56 bg-white rounded-md shadow-lg ring-1 ring-black/5 py-1">
-                  <div className="px-4 py-2 text-sm text-gray-700 border-b">
-                    <div className="font-medium line-clamp-1">{fullName}</div>
-                    <div className="text-gray-500 text-xs line-clamp-1">{user.email}</div>
+                <div className="absolute right-0 mt-2 w-64 bg-white rounded-lg shadow-xl ring-1 ring-black/5 overflow-hidden">
+                  {/* User info section with gradient background */}
+                  <div className="px-4 py-3 border-b">
+                    <div className="font-semibold text-gray-900 line-clamp-1">{fullName}</div>
+                    <div className="text-gray-600 text-xs line-clamp-1 mt-0.5">{user.email}</div>
+                    
+                    {/* Subscription tier badge */}
+                    <div className="mt-2 inline-flex items-center gap-1.5">
+                      <span className="text-xs font-medium text-gray-600">Plan:</span>
+                      <span className={
+                        `px-2 py-0.5 rounded-full text-xs font-semibold ` +
+                        (tier === 'free' 
+                          ? 'bg-gray-200 text-gray-700' 
+                          : tier === 'pro'
+                          ? 'bg-indigo-600 text-white'
+                          : tier === 'team'
+                          ? 'bg-purple-600 text-white'
+                          : 'bg-emerald-600 text-white'
+                        )
+                      }>
+                        {tier.charAt(0).toUpperCase() + tier.slice(1)}
+                      </span>
+                    </div>
                   </div>
-                  {/* Read-only info only; removed profile & billing navigation per new requirements */}
-                  <button
-                    className="w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-red-50"
-                    onClick={handleLogout}
-                  >
-                    Cerrar sesión
-                  </button>
+                  
+                  {/* Actions section */}
+                  <div className="py-1">
+                    <button
+                      className="w-full text-left px-4 py-2.5 text-sm text-red-600 hover:bg-red-50 transition-colors font-medium"
+                      onClick={handleLogout}
+                    >
+                      Cerrar sesión
+                    </button>
+                  </div>
                 </div>
               )}
             </div>
