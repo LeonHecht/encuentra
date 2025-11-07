@@ -1,10 +1,13 @@
+import os
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    # read .env at project root, allow unknowns (or set to "forbid" if you list all fields)
+    # Read env from an environment-specific file first (if present), then fallback to .env
+    # Set APP_ENV=production (or staging, etc.) to load .env.production before .env
+    _env = os.getenv("APP_ENV", "local")
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=(f".env.{_env}", ".env"),
         case_sensitive=False,
         extra="ignore",   # or "forbid" IF you list every possible env var here
     )

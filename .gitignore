@@ -92,3 +92,9 @@ landing/build/
 landing/.env
 landing/.env.local
 landing/.env.*.local
+
+# Supabase CLI local artifacts
+frontend/supabase/.temp/
+# optional extras you can also ignore if present
+frontend/supabase/.branches/
+frontend/supabase/.local/

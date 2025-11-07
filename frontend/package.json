@@ -9,8 +9,10 @@
     "lint": "eslint .",
     "preview": "vite preview",
     "db:login": "supabase login",
-    "db:link": "supabase link --project-ref ithmoffbysbnkfpcxunn",
+    "db:linkdev": "supabase link --project-ref ithmoffbysbnkfpcxunn",
+    "db:linkprd": "supabase link --project-ref jjmazcflqjculvzwoshy",
     "db:push": "supabase db push",
+    "db:pull": "supabase db pull",
     "db:diff": "supabase db diff -f",
     "db:studio": "supabase studio"
   },
