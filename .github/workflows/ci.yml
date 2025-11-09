@@ -33,7 +33,7 @@ jobs:
         run: npm run lint --if-present
 
       - name: Unit tests
-        run: npm test --if-present -- --ci
+        run: npm run test
         env:
           CI: true
 
@@ -64,8 +64,8 @@ jobs:
 
       - name: Install deps
         run: |
-          if [ -f "pyproject.toml" ]; then pip install -e .[dev]; fi
-          if [ -f "requirements.txt" ]; then pip install -r requirements.txt; fi
+          pip install -r requirements.txt
+          pip install pytest pytest-cov
 
       - name: Lint (ruff/flake8)
         run: |

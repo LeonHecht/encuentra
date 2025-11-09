@@ -15,7 +15,7 @@ vi.mock('@/components/SpaceSelect', () => ({
 }))
 
 // Spy-able mock for useApi
-const useApiMock = vi.fn(async (path, qs = '') => {
+const apiMock = vi.fn(async (path, qs = '') => {
   if (path === 'user/spaces') return { spaces: ['public'] }
 
   if (path === 'search') {
@@ -23,7 +23,7 @@ const useApiMock = vi.fn(async (path, qs = '') => {
     if (q === 'derecho') {
       return {
         results: [
-          { id: 'doc-1', title: 'Sentencia 123/2020', score: 0.87, snippet: '… derecho constitucional …' },
+          { id: 'doc-1', title: 'Sentencia 123/2020', score: 0.87, snippet: 'derecho constitucional' },
         ],
       }
     }
@@ -32,7 +32,10 @@ const useApiMock = vi.fn(async (path, qs = '') => {
   }
   return {}
 })
-vi.mock('@/hooks/useApi', () => ({ useApi: (...args) => useApiMock(...args) }))
+vi.mock('@/hooks/useApi', () => ({
+  useApi: (...args) => apiMock(...args),
+  apiFetch: (...args) => apiMock(...args),
+}))
 
 describe('<Search />', () => {
   it('ignores blank queries (no search, no empty-state)', async () => {
@@ -40,17 +43,13 @@ describe('<Search />', () => {
 
     // waits for spaces load + heading
     await waitFor(() => expect(screen.getByText(/Buscar casos/i)).toBeInTheDocument())
-    expect(useApiMock).toHaveBeenCalledWith('user/spaces')
+    expect(apiMock).toHaveBeenCalledWith('user/spaces')
 
-    const input = screen.getByPlaceholderText('Ingresa las palabras de tu búsqueda...')
-    const btn   = screen.getByRole('button', { name: /buscar/i })
-
-    // Click with empty input → should NOT call search
+    const btn = screen.getByRole('button', { name: /buscar/i })
     await userEvent.click(btn)
     // Only the initial call to user/spaces should exist so far
-    expect(useApiMock.mock.calls.filter(c => c[0] === 'search').length).toBe(0)
-
-    // And because searched stays false, empty-state should NOT render
+    expect(apiMock.mock.calls.filter(c => c[0] === 'search').length).toBe(0)
+    // Searched flag stayed false, so no empty-state
     expect(screen.queryByText(/No se encontraron resultados\./)).not.toBeInTheDocument()
   })
 
@@ -58,7 +57,7 @@ describe('<Search />', () => {
     render(<Search />)
     await screen.findByText(/Buscar casos/)
 
-    const input = screen.getByPlaceholderText('Ingresa las palabras de tu búsqueda...')
+    const input = screen.getByPlaceholderText(/Ingresa las palabras/i)
     const btn   = screen.getByRole('button', { name: /buscar/i })
 
     await userEvent.type(input, 'derecho')
@@ -71,7 +70,7 @@ describe('<Search />', () => {
     render(<Search />)
     await screen.findByText(/Buscar casos/)
 
-    const input = screen.getByPlaceholderText('Ingresa las palabras de tu búsqueda...')
+    const input = screen.getByPlaceholderText(/Ingresa las palabras/i)
     const btn   = screen.getByRole('button', { name: /buscar/i })
 
     await userEvent.type(input, 'nohits')
@@ -80,3 +79,4 @@ describe('<Search />', () => {
     await screen.findByText(/No se encontraron resultados\./)
   })
 })
+

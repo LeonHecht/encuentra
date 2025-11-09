@@ -9,7 +9,7 @@ vi.mock('../lib/supabaseClient', () => {
     supabase: {
       auth: {
         getSession: () => Promise.resolve({ data: { session: { user: { id: 'u1', user_metadata: { full_name: 'Test User' }, email: 'test@example.com' } } } }),
-        onAuthStateChange: (cb) => ({ data: { subscription: { unsubscribe: () => {} } } }),
+        onAuthStateChange: () => ({ data: { subscription: { unsubscribe: () => {} } } }),
       },
     },
   };

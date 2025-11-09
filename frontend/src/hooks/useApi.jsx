@@ -6,7 +6,7 @@ import { supabase } from "../lib/supabaseClient";
  * @param {string} params Query string, p.ej. "?q=delito&space=supreme_court"
  * @returns {Promise<any>}  JSON parseado
  */
-export const useApi = async (path, params = "", options = {}) => {
+export const apiFetch = async (path, params = "", options = {}) => {
   const { data: { session } } = await supabase.auth.getSession();
   const token = session?.access_token;
 
@@ -21,3 +21,7 @@ export const useApi = async (path, params = "", options = {}) => {
     return res.json();
   });
 };
+
+// Back-compat named export; avoid using this name in app code to satisfy eslint-hooks
+export { apiFetch as useApi };
+export default apiFetch;

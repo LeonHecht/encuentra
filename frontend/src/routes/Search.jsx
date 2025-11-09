@@ -1,16 +1,16 @@
 import { useState, useEffect } from "react";
-import { useApi } from "@/hooks/useApi";
+import { apiFetch } from "@/hooks/useApi";
 import SpaceSelect  from "@/components/SpaceSelect";
 
 
 export default function Search() {
   const [q, setQ]           = useState("");
-  const [spaces, setSpaces] = useState([]);
+  const [_spaces, setSpaces] = useState([]);
   const [space, setSpace]   = useState("");
   const [results, setResults] = useState([]);
   const [searched, setSearched] = useState(false);
   useEffect(() => {
-    useApi("user/spaces").then((d) => {
+    apiFetch("user/spaces").then((d) => {
       const s = d.spaces || [];
       setSpaces(s);
       if (s.length > 0) setSpace(s[0]);
@@ -54,7 +54,7 @@ export default function Search() {
     setLoading(true);
     setSearched(true);
     try {
-      const res = await useApi(
+      const res = await apiFetch(
         "search",
         `?q=${encodeURIComponent(q)}&space=${space}`
       );

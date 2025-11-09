@@ -10,7 +10,7 @@ vi.mock('@/components/SpaceSelect', () => ({
 }));
 
 // Mock useApi to return spaces and search results deterministically
-const useApiMock = vi.fn(async (path) => {
+const apiMock = vi.fn(async (path) => {
   if (path === 'user/spaces') {
     return { spaces: ['public', 'org1/space-a'] };
   }
@@ -24,7 +24,10 @@ const useApiMock = vi.fn(async (path) => {
   }
   return {};
 });
-vi.mock('@/hooks/useApi', () => ({ useApi: (...args) => useApiMock(...args) }));
+vi.mock('@/hooks/useApi', () => ({
+  useApi: (...args) => apiMock(...args),
+  apiFetch: (...args) => apiMock(...args),
+}));
 
 it('loads spaces, performs search, and renders results', async () => {
   render(<Search />);
@@ -33,7 +36,7 @@ it('loads spaces, performs search, and renders results', async () => {
   await waitFor(() => expect(screen.getByText('Space: public')).toBeInTheDocument());
 
   // Type a query and trigger search
-  const input = screen.getByPlaceholderText('Ingresa las palabras de tu búsqueda...');
+  const input = screen.getByPlaceholderText(/Ingresa las palabras/i);
   await userEvent.type(input, 'contrato');
   const button = screen.getByRole('button', { name: 'Buscar' });
   await userEvent.click(button);
@@ -43,6 +46,7 @@ it('loads spaces, performs search, and renders results', async () => {
   expect(screen.getByText('Case Two')).toBeInTheDocument();
 
   // Ensure useApi called for spaces and search
-  expect(useApiMock).toHaveBeenCalledWith('user/spaces');
-  expect(useApiMock).toHaveBeenCalledWith('search', expect.stringMatching(/\?q=contrato/));
+  expect(apiMock).toHaveBeenCalledWith('user/spaces');
+  expect(apiMock).toHaveBeenCalledWith('search', expect.stringMatching(/\?q=contrato/));
 });
+
