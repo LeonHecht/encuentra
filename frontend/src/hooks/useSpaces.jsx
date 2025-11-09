@@ -4,8 +4,9 @@ import { useAuth } from "@/context/AuthContext";
 import { formatSpaceLabel } from "@/utils/formatSpaceLabel";
 
 export function useSpaces() {
-  const { session } = useAuth();
-  const user = session?.user;                    // Supabase user object
+  // Be resilient if used outside of AuthProvider (e.g., some tests)
+  const auth = useAuth();
+  const user = auth?.session?.user; // Supabase user object
   const [spaces, setSpaces] = useState([]);
   const [loading, setLoading] = useState(true);
 
