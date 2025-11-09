@@ -2,7 +2,6 @@ import { vi, beforeEach, test, expect } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import React from 'react';
-import Landing from './Landing';
 
 // Mock motion.div to a plain div to avoid animation timing complexities
 vi.mock('framer-motion', () => ({

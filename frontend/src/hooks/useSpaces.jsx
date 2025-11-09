@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useApi } from "./useApi";
+import { apiFetch } from "./useApi";
 import { useAuth } from "@/context/AuthContext";
 import { formatSpaceLabel } from "@/utils/formatSpaceLabel";
 
@@ -11,7 +11,7 @@ export function useSpaces() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    useApi("user/spaces")
+    apiFetch("user/spaces")
       .then((d) => setSpaces(d.spaces))
       .finally(() => setLoading(false));
   }, []);

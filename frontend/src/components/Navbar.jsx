@@ -64,25 +64,26 @@ export default function Navbar() {
     async function fetchTier() {
       if (!user) return setTier("free");
       try {
-        const { useApi } = await import('../hooks/useApi.jsx');
-        const res = await useApi('billing/status');
+        const mod = await import('../hooks/useApi.jsx');
+        const fetcher = mod.apiFetch || mod.default || mod.useApi;
+        const res = await fetcher('billing/status');
         if (!active) return;
         setTier(res?.subscription_tier || 'free');
-      } catch (e) {
+      } catch {
         if (active) setTier('free');
       }
     }
     fetchTier();
     return () => { active = false; };
-  }, [user?.id]);
+  }, [user]);
 
   async function handleLogout() {
     try {
       // Clear any legacy token used by API
-      try { localStorage.removeItem('auth'); } catch {}
+      try { localStorage.removeItem('auth'); } catch { /* noop */ }
       const { supabase } = await import('../lib/supabaseClient');
       await supabase.auth.signOut();
-    } catch {}
+    } catch { /* noop */ }
     setOpen(false);
     navigate('/login');
   }
