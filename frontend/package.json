@@ -14,7 +14,9 @@
     "db:push": "supabase db push",
     "db:pull": "supabase db pull",
     "db:diff": "supabase db diff -f",
-    "db:studio": "supabase studio"
+    "db:studio": "supabase studio",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
   },
   "dependencies": {
     "@ai-sdk/react": "^2.0.76",
