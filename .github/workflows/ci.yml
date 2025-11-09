@@ -2,8 +2,9 @@ name: ci
 
 on:
   pull_request:
+    branches: ['staging', 'master']
   push:
-    branches: ["**"]   # run on all branches (useful while setting up)
+    branches: ['staging', 'master']
 
 jobs:
   frontend:
@@ -51,7 +52,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: '3.11'
 
       - name: Cache pip
         uses: actions/cache@v4
