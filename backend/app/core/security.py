@@ -36,7 +36,7 @@ def verify_supabase_token(token: str) -> dict:
                 algorithms=["ES256", "RS256"],
                 options={"verify_aud": False},  # Supabase uses aud='authenticated'
             )
-            print(f"Token verified via JWKS (ES256)")
+            # print(f"Token verified via JWKS (ES256)")
             return payload
         except jwt.ExpiredSignatureError:
             raise ValueError("Token has expired")

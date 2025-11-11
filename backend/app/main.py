@@ -39,13 +39,41 @@ app.mount("/downloads", StaticFiles(directory=static_dir), name="downloads")
 def ping():
     return {"status": "pong"}
 
-# indexamos una sola vez al startup
 @app.on_event("startup")
 def on_startup():
-    search_engine.index(space="supreme_court")
+    """Conditionally (re)index spaces at startup.
+
+    Behavior:
+    - If SKIP_REINDEX_ON_STARTUP is set, only index a space if it doesn't exist yet.
+    - If FORCE_REINDEX_ON_STARTUP is true, always rebuild indexes.
+    - Default (both false): always index the main corpus space and any upload spaces
+      (preserves previous local dev behavior).
+    """
+    force = settings.FORCE_REINDEX_ON_STARTUP
+    skip = settings.SKIP_REINDEX_ON_STARTUP
+
+    def needs_index(space: str) -> bool:
+        if force:
+            return True
+        if skip:
+            # Only build if backend reports space missing
+            try:
+                return not search_engine.has_space(space)
+            except Exception:
+                return True  # conservative fallback
+        # default legacy behavior: always index
+        return True
+
+    # Main corpus space
+    if needs_index("supreme_court"):
+        search_engine.index(space="supreme_court")
+
+    # User upload spaces
     uploads_root = Path(settings.DATA_UPLOAD)
     if uploads_root.exists():
         for path in uploads_root.glob("*/*"):
             if path.is_dir():
                 rel = path.relative_to(uploads_root)
-                search_engine.index(space=str(rel))
+                space_name = str(rel)
+                if needs_index(space_name):
+                    search_engine.index(space=space_name)
