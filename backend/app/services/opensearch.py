@@ -16,12 +16,21 @@ from urllib.parse import urlparse
 from opensearchpy import OpenSearch, helpers
 from opensearchpy.exceptions import NotFoundError
 
+# Optional S3 support (used when S3_* settings are configured)
+try:  # lazy optional dependency
+    import boto3  # type: ignore
+    from botocore.exceptions import ClientError  # type: ignore
+except Exception:  # pragma: no cover - optional
+    boto3 = None
+    ClientError = Exception
+
 from ..core.config import settings
 
 
 class OpenSearchSearch:
     def __init__(self) -> None:
         self._client: OpenSearch | None = None
+        self._s3_client = None
 
     # ------------------------------------------------------------------
     # Client helpers
@@ -128,6 +137,17 @@ class OpenSearchSearch:
         client.indices.create(index=index_name, body=body)
 
     def _resolve_download_url(self, doc_id: str) -> str | None:
+        # Prefer S3 presigned URL if configured and presigning during indexing is enabled
+        if (
+            getattr(settings, "S3_BUCKET", None)
+            and getattr(settings, "S3_FILES_PREFIX", None)
+            and getattr(settings, "S3_PRESIGN_ON_INDEX", False)
+        ):
+            url = self._presign_by_id(doc_id)
+            if url:
+                return url
+
+        # Filesystem fallback (dev/local)
         files_root = Path(settings.CORPUS_PATH) / "files"
         for ext in (".pdf", ".PDF", ".htm", ".html", ".HTML", ".docx", ".doc", ".txt"):
             candidate = files_root / f"{doc_id}{ext}"
@@ -135,35 +155,98 @@ class OpenSearchSearch:
                 return f"/files/{candidate.name}"
         return None
 
+    def _presign_by_id(self, doc_id: str) -> str | None:
+        """Attempt to generate a presigned S3 URL for a given document id.
+        Tries a set of known extensions and returns the first existing object's URL.
+        """
+        if boto3 is None:
+            return None
+        bucket = getattr(settings, "S3_BUCKET", None)
+        prefix_raw = getattr(settings, "S3_FILES_PREFIX", None)
+        if not bucket or not prefix_raw:
+            return None
+        try:
+            client = self._get_s3_client()
+            prefix = str(prefix_raw).rstrip("/") + "/"
+            for ext in (".pdf", ".PDF", ".htm", ".html", ".HTML", ".docx", ".doc", ".txt"):
+                key = f"{prefix}{doc_id}{ext}"
+                try:
+                    client.head_object(Bucket=bucket, Key=key)
+                except ClientError:
+                    continue
+                try:
+                    return client.generate_presigned_url(
+                        "get_object",
+                        Params={"Bucket": bucket, "Key": key},
+                        ExpiresIn=int(getattr(settings, "S3_URL_TTL", 604800)),
+                    )
+                except Exception:
+                    return None
+        except Exception:
+            return None
+        return None
+
     def _load_documents(self, space: str) -> list[dict[str, Any]]:
         documents: list[dict[str, Any]] = []
 
         if space == "supreme_court":
-            jsonl_file = Path(settings.CORPUS_PATH) / "corpus.jsonl"
-            if not jsonl_file.exists():
-                print(f"[OpenSearch] corpus.jsonl not found for space '{space}'.")
-                return []
-            with jsonl_file.open(encoding="utf-8") as fh:
-                for line in fh:
-                    try:
-                        obj = json.loads(line)
-                    except json.JSONDecodeError:
-                        continue
-
-                    doc_id = obj.get("id") or obj.get("doc_id")
-                    if not doc_id:
-                        continue
-                    title = obj.get("title", "")
-                    text = obj.get("text", "")
-                    documents.append(
-                        {
+            # Try S3 first if configured
+            if getattr(settings, "S3_BUCKET", None) and getattr(settings, "S3_CORPUS_KEY", None) and boto3 is not None:
+                try:
+                    client = self._get_s3_client()
+                    obj = client.get_object(Bucket=settings.S3_BUCKET, Key=settings.S3_CORPUS_KEY)
+                    body = obj["Body"]
+                    # Iterate lines to avoid loading whole file into memory
+                    for raw in body.iter_lines():
+                        if not raw:
+                            continue
+                        try:
+                            line = raw.decode("utf-8")
+                            rec = json.loads(line)
+                        except Exception:
+                            continue
+                        doc_id = rec.get("id") or rec.get("doc_id")
+                        if not doc_id:
+                            continue
+                        title = rec.get("title", "")
+                        text = rec.get("text", "")
+                        documents.append({
                             "id": doc_id,
                             "title": title,
                             "text": text,
                             "space": space,
                             "download_url": self._resolve_download_url(doc_id),
-                        }
-                    )
+                        })
+                except Exception as e:
+                    print(f"[OpenSearch] Failed to load corpus from S3: {e}. Falling back to filesystem.")
+
+            # Filesystem fallback or if S3 not configured
+            if not documents:
+                jsonl_file = Path(settings.CORPUS_PATH) / "corpus.jsonl"
+                if not jsonl_file.exists():
+                    print(f"[OpenSearch] corpus.jsonl not found for space '{space}'.")
+                    return []
+                with jsonl_file.open(encoding="utf-8") as fh:
+                    for line in fh:
+                        try:
+                            obj = json.loads(line)
+                        except json.JSONDecodeError:
+                            continue
+
+                        doc_id = obj.get("id") or obj.get("doc_id")
+                        if not doc_id:
+                            continue
+                        title = obj.get("title", "")
+                        text = obj.get("text", "")
+                        documents.append(
+                            {
+                                "id": doc_id,
+                                "title": title,
+                                "text": text,
+                                "space": space,
+                                "download_url": self._resolve_download_url(doc_id),
+                            }
+                        )
         else:
             dir_path = Path(settings.DATA_UPLOAD) / space
             if not dir_path.exists():
@@ -216,6 +299,17 @@ class OpenSearchSearch:
             except Exception:
                 time.sleep(1)
         raise RuntimeError("OpenSearch not ready")
+
+    # ------------------------------------------------------------------
+    # S3 helpers
+    # ------------------------------------------------------------------
+    def _get_s3_client(self):
+        if self._s3_client is None:
+            if boto3 is None:
+                raise RuntimeError("boto3 is required for S3 operations but is not installed.")
+            # Rely on environment/instance role for credentials
+            self._s3_client = boto3.client("s3")
+        return self._s3_client
     
     # ------------------------------------------------------------------
     # Public API (mirrors BM25Search)
@@ -307,14 +401,17 @@ class OpenSearchSearch:
             else:
                 text = source.get("text", "")
                 snippet = " ".join(text.split()[:50])
-
+            # Lazily presign S3 URLs at query time if missing in index
+            dl_url = source.get("download_url")
+            if not dl_url and getattr(settings, "S3_PRESIGN_ON_QUERY", True):
+                dl_url = self._presign_by_id(source.get("id") or hit.get("_id"))
             hits.append(
                 {
                     "id": source.get("id") or hit.get("_id"),
                     "title": source.get("title", ""),
                     "score": float(hit.get("_score") or 0.0),
                     "snippet": snippet,
-                    "download_url": source.get("download_url"),
+                    "download_url": dl_url,
                 }
             )
         return hits
@@ -328,11 +425,14 @@ class OpenSearchSearch:
             return None
 
         source = doc.get("_source", {})
+        dl_url = source.get("download_url")
+        if not dl_url and getattr(settings, "S3_PRESIGN_ON_QUERY", True):
+            dl_url = self._presign_by_id(doc_id)
         return {
             "id": doc_id,
             "title": source.get("title", ""),
             "text": source.get("text", ""),
-            "download_url": source.get("download_url"),
+            "download_url": dl_url,
         }
     
     def fetch_passages(
@@ -399,6 +499,10 @@ class OpenSearchSearch:
         # Build normalized passages
         passages = []
         for i, frag in enumerate(frags[:per_id]):
+            # Lazily presign S3 URLs if missing
+            dl_url = hit.get("_source", {}).get("download_url")
+            if not dl_url and getattr(settings, "S3_PRESIGN_ON_QUERY", True):
+                dl_url = self._presign_by_id(doc_id)
             passages.append({
                 "doc_id": doc_id,
                 "rank": i + 1,
@@ -406,7 +510,7 @@ class OpenSearchSearch:
                 "approx_tokens": fragment_size // chars_per_token,
                 "score": float(hit.get("_score") or 0.0),
                 "title": hit.get("_source", {}).get("title", ""),
-                "download_url": hit.get("_source", {}).get("download_url"),
+                "download_url": dl_url,
             })
 
         # If the highlighter produced nothing (rare), fallback to the beginning of the doc

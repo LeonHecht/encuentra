@@ -37,9 +37,29 @@ class Settings(BaseSettings):
 
     # --- OpenAI ---
     OPENAI_API_KEY: str | None = None
-    OPENAI_CHAT_MODEL: str = "gpt-5-nano"
+    OPENAI_CHAT_MODEL: str = "gpt-5-nano"   # fall back to gpt-5-nano (will be overwritten by .env.[stage] files)
     MAX_DOC_TOKENS: int = 2000
     MAX_DOCS: int = 3
+
+    # --- S3 corpus/files (optional; used in staging/prod) ---
+    # Bucket that holds corpus.jsonl and the original files
+    S3_BUCKET: str | None = None
+    # Object key for the corpus JSONL, e.g. "staging/corpus.jsonl" or "prod/corpus.jsonl"
+    S3_CORPUS_KEY: str | None = None
+    # Prefix for original files within the bucket, e.g. "staging/files/" or "prod/files/"
+    S3_FILES_PREFIX: str | None = None
+    # TTL in seconds for presigned URLs to original files
+    S3_URL_TTL: int = 7 * 24 * 60 * 60  # default 7 days
+    # Whether to generate S3 presigned URLs during indexing (expensive for large corpora)
+    S3_PRESIGN_ON_INDEX: bool = False
+    # Whether to generate S3 presigned URLs at query time (recommended)
+    S3_PRESIGN_ON_QUERY: bool = True
+
+    # --- Indexing controls ---
+    # If true, force a rebuild of indexes on startup (expensive for OpenSearch in staging/prod)
+    FORCE_REINDEX_ON_STARTUP: bool = False
+    # If true, skip rebuilding on startup unless the space is missing (recommended for staging/prod)
+    SKIP_REINDEX_ON_STARTUP: bool = False
 
     # --- Supabase ---
     SUPABASE_URL: str | None = None
