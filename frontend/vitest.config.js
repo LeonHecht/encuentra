@@ -10,13 +10,22 @@ export default defineConfig({
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './src'),
+      // Mock CSS imports to empty modules
+      'streamdown/style.css': path.resolve(
+        __dirname,
+        './src/test/mocks/empty.js'
+      ),
+      'katex/dist/katex.min.css': path.resolve(
+        __dirname,
+        './src/test/mocks/empty.js'
+      ),
     },
   },
   test: {
     environment: 'jsdom',
     globals: true,
     setupFiles: './src/test/setup.ts',
-    css: true,
+    css: false, // Disable CSS processing entirely in tests
     deps: {
       optimizer: {
         web: {
