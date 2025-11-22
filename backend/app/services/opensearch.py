@@ -14,6 +14,7 @@ from typing import Any, Iterable
 from urllib.parse import urlparse
 
 from opensearchpy import OpenSearch, helpers
+from opensearchpy import AWSV4SignerAuth, RequestsHttpConnection
 from opensearchpy.exceptions import NotFoundError
 
 # Optional S3 support (used when S3_* settings are configured)
@@ -66,13 +67,10 @@ class OpenSearchSearch:
                 else:
                     hosts.append({"host": raw, "port": 9200})
         return hosts, use_ssl
-
+    
     def _get_client(self) -> OpenSearch:
         if self._client is None:
             hosts, use_ssl = self._build_hosts()
-            auth = None
-            if settings.OPENSEARCH_USERNAME and settings.OPENSEARCH_PASSWORD:
-                auth = (settings.OPENSEARCH_USERNAME, settings.OPENSEARCH_PASSWORD)
 
             client_kwargs: dict[str, Any] = {
                 "hosts": hosts,
@@ -80,14 +78,50 @@ class OpenSearchSearch:
                 "timeout": settings.OPENSEARCH_TIMEOUT,
                 "verify_certs": settings.OPENSEARCH_VERIFY_CERTS,
             }
-            if use_ssl is not None:
-                client_kwargs["use_ssl"] = use_ssl
-            if auth:
-                client_kwargs["http_auth"] = auth
-            if settings.OPENSEARCH_CA_CERT:
-                client_kwargs["ca_certs"] = settings.OPENSEARCH_CA_CERT
+
+            aws_region = getattr(settings, "OPENSEARCH_AWS_REGION", None)
+
+            # --- Branch 1: AWS (Managed / Serverless via IAM + SigV4) ---
+            if aws_region:
+                if boto3 is None:
+                    raise RuntimeError(
+                        "boto3 is required for AWS OpenSearch IAM auth but is not installed."
+                    )
+
+                service = getattr(settings, "OPENSEARCH_AWS_SERVICE", "aoss")
+
+                session = boto3.Session()
+                credentials = session.get_credentials()
+                if credentials is None:
+                    raise RuntimeError("No AWS credentials available for OpenSearch IAM auth.")
+
+                auth = AWSV4SignerAuth(credentials, aws_region, service)
+
+                client_kwargs.update(
+                    {
+                        "http_auth": auth,
+                        "use_ssl": True,
+                        "verify_certs": True,
+                        "connection_class": RequestsHttpConnection,
+                    }
+                )
+
+            # --- Branch 2: Local / non-AWS clusters (dev) ---
+            else:
+                auth = None
+                if settings.OPENSEARCH_USERNAME and settings.OPENSEARCH_PASSWORD:
+                    auth = (settings.OPENSEARCH_USERNAME, settings.OPENSEARCH_PASSWORD)
+
+                if auth:
+                    client_kwargs["http_auth"] = auth
+
+                if use_ssl is not None:
+                    client_kwargs["use_ssl"] = use_ssl
+                if settings.OPENSEARCH_CA_CERT:
+                    client_kwargs["ca_certs"] = settings.OPENSEARCH_CA_CERT
 
             self._client = OpenSearch(**client_kwargs)
+
         return self._client
 
     # ------------------------------------------------------------------
@@ -97,17 +131,27 @@ class OpenSearchSearch:
         safe = space.replace("/", "__").replace(" ", "_").lower()
         safe = re.sub(r"[^a-z0-9_\-]+", "-", safe)
         return f"{settings.OPENSEARCH_INDEX_PREFIX}-{safe}"
-
+    
     def _create_index_if_needed(self, client: OpenSearch, index_name: str) -> None:
         if client.indices.exists(index=index_name):
             return
 
-        body = {
-            "settings": {
-                "index": {
+        # Base index settings, used for both local and AOSS
+        index_settings: dict[str, Any] = {}
+        service = getattr(settings, "OPENSEARCH_AWS_SERVICE", "aoss")
+
+        # Only set shards/replicas when NOT on Serverless
+        if service != "aoss":
+            index_settings.update(
+                {
                     "number_of_shards": 1,
                     "number_of_replicas": 1,
-                },
+                }
+            )
+
+        body = {
+            "settings": {
+                "index": index_settings,
                 "analysis": {
                     "analyzer": {
                         "spanish_default": {
@@ -134,6 +178,7 @@ class OpenSearchSearch:
                 }
             },
         }
+
         client.indices.create(index=index_name, body=body)
 
     def _resolve_download_url(self, doc_id: str) -> str | None:
@@ -311,11 +356,16 @@ class OpenSearchSearch:
             self._s3_client = boto3.client("s3")
         return self._s3_client
     
+    def _is_serverless(self):
+        return getattr(settings, "OPENSEARCH_AWS_SERVICE", "aoss") == "aoss" and getattr(settings, "OPENSEARCH_AWS_REGION", None)
+    
     # ------------------------------------------------------------------
     # Public API (mirrors BM25Search)
     # ------------------------------------------------------------------
     def index(self, space: str = "supreme_court") -> None:
-        self._wait_for_cluster()
+        if not self._is_serverless():
+            self._wait_for_cluster()
+        
         client = self._get_client()
         alias = self._alias_name(space)
 
@@ -324,7 +374,9 @@ class OpenSearchSearch:
             print(f"[OpenSearch] No documents to index for space '{space}'.")
             return
 
-        build_name = self._build_index_name(space, suffix=str(int(__import__("time").time())))
+        build_name = (
+            alias if self._is_serverless() else self._build_index_name(space, suffix=str(int(__import__("time").time())))
+        )
 
         # create build index (mapping/analyzer same as before)
         self._create_index_if_needed(client, build_name)
@@ -339,37 +391,47 @@ class OpenSearchSearch:
             raise_on_exception=False,
         )
 
-        # alias swap (atomic)
-        actions = []
-        if client.indices.exists_alias(name=alias):
-            olds = list(client.indices.get_alias(name=alias).keys())
-            for o in olds:
-                actions.append({"remove": {"index": o, "alias": alias}})
-        actions.append({"add": {"index": build_name, "alias": alias}})
-        client.indices.update_aliases(body={"actions": actions})
+        if not self._is_serverless():
+            # alias swap (atomic)
+            actions = []
+            if client.indices.exists_alias(name=alias):
+                olds = list(client.indices.get_alias(name=alias).keys())
+                for o in olds:
+                    actions.append({"remove": {"index": o, "alias": alias}})
+            actions.append({"add": {"index": build_name, "alias": alias}})
+            client.indices.update_aliases(body={"actions": actions})
 
-        # optional: clean up old indices with same prefix (keep last N)
-        keep_n = 2
-        all_idxs = [i for i in client.indices.get_alias(index=f"{alias}-*").keys()]
-        # sort by name (timestamp suffix makes this work)
-        for old in sorted(all_idxs)[:-keep_n]:
-            if old != build_name:
-                client.indices.delete(index=old, ignore=[404])
+            # optional: clean up old indices with same prefix (keep last N)
+            keep_n = 2
+            all_idxs = [i for i in client.indices.get_alias(index=f"{alias}-*").keys()]
+            # sort by name (timestamp suffix makes this work)
+            for old in sorted(all_idxs)[:-keep_n]:
+                if old != build_name:
+                    client.indices.delete(index=old, ignore=[404])
 
-        print(f"[OpenSearch] Indexed {len(documents)} docs into alias '{alias}' via '{build_name}'.")
+            print(f"[OpenSearch] Indexed {len(documents)} docs into alias '{alias}' via '{build_name}'.")
+        else:
+            print(f"[OpenSearch] Indexed {len(documents)} docs into serverless index '{build_name}'.")
 
     def has_space(self, space: str) -> bool:
-        """Return True if the logical space exists (via alias)."""
+        """Return True if the logical space exists (alias or index)."""
         client = self._get_client()
         alias = self._alias_name(space)
-        return bool(client.indices.exists_alias(name=alias))
+        if client.indices.exists_alias(name=alias):
+            return True
+        try:
+            return bool(client.indices.exists(index=alias))
+        except Exception:
+            return False
 
     def search(self, query: str, top_k: int = 30, space: str = "supreme_court") -> list[dict[str, Any]]:
         client = self._get_client()
         alias = self._alias_name(space)
+        target_index = alias
         if not client.indices.exists_alias(name=alias):
-            print(f"[OpenSearch] Alias '{alias}' missing for space '{space}'.")
-            return []
+            if not client.indices.exists(index=alias):
+                print(f"[OpenSearch] Alias/index '{alias}' missing for space '{space}'.")
+                return []
 
         body = {
             "size": top_k,
@@ -390,7 +452,7 @@ class OpenSearchSearch:
             },
         }
 
-        response = client.search(index=alias, body=body)
+        response = client.search(index=target_index, body=body)
         hits: list[dict[str, Any]] = []
         for hit in response.get("hits", {}).get("hits", []):
             source = hit.get("_source", {})
@@ -451,8 +513,10 @@ class OpenSearchSearch:
         """
         client = self._get_client()
         alias = self._alias_name(space)
+        target_index = alias
         if not client.indices.exists_alias(name=alias):
-            return []
+            if not client.indices.exists(index=alias):
+                return []
 
         fragment_size = max(128, min(8192, int(max_tokens * chars_per_token)))
 
@@ -488,7 +552,7 @@ class OpenSearchSearch:
             "_source": {"includes": ["id", "title", "download_url"]},
         }
 
-        res = client.search(index=alias, body=body)
+        res = client.search(index=target_index, body=body)
         hits = res.get("hits", {}).get("hits", [])
         if not hits:
             return []

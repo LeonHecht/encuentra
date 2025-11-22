@@ -37,6 +37,38 @@ expects the same filesystem layout used by the BM25 implementation. This keeps
 feature parity between both modes, enabling a gradual migration to a scalable
 search cluster while retaining the local developer experience.
 
+### OpenSearch Serverless (AOSS) on App Runner
+
+You can run staging/prod on AWS OpenSearch Serverless using IAM role auth from App Runner while keeping local OpenSearch for dev.
+
+1. Configure env for Serverless (example for staging):
+
+   ```env
+   # Backend selection
+   SEARCH_BACKEND=opensearch
+
+   # AOSS + SigV4
+   OPENSEARCH_AWS_REGION=us-east-1
+   OPENSEARCH_AWS_SERVICE=aoss
+   # Use your collection endpoint hostname
+   OPENSEARCH_HOSTS=https://<collection-id>.<region>.aoss.amazonaws.com
+   OPENSEARCH_VERIFY_CERTS=true
+   OPENSEARCH_INDEX_PREFIX=encuentra-stg
+   ```
+
+2. App Runner IAM role: attach a task role with permissions allowed by your AOSS data access policy (least-privilege). Typical actions include read/search and indexing on specific collections and indexes. Credentials are sourced automatically by boto3 in App Runner.
+3. Networking: Prefer PrivateLink (AOSS VPC endpoint) and attach an App Runner VPC connector to the subnets where the endpoint lives. In your AOSS network access policy, allow the VPC endpoint ID. If you cannot use PrivateLink yet, enable public network access in the policy temporarily.
+4. Behavior differences handled in code:
+   - No cluster health wait on AOSS.
+   - Index aliases/rollover are skipped; a stable index name per space is used instead.
+   - Shard/replica counts are not set in Serverless (managed for you).
+5. Local dev remains unchanged. Use Docker OpenSearch with:
+   ```env
+   SEARCH_BACKEND=opensearch
+   OPENSEARCH_HOSTS=http://localhost:9200
+   OPENSEARCH_VERIFY_CERTS=false
+   ```
+
 ## Environments and .env files
 
 This backend supports environment-specific configuration files using `APP_ENV`:

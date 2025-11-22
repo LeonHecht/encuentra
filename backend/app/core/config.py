@@ -34,6 +34,8 @@ class Settings(BaseSettings):
     OPENSEARCH_USERNAME: str | None = None
     OPENSEARCH_PASSWORD: str | None = None
     OPENSEARCH_CA_CERT: str | None = None
+    OPENSEARCH_AWS_REGION: str | None = None
+    OPENSEARCH_AWS_SERVICE: str = "aoss"  # "es" default, "aoss" for serverless
 
     # --- OpenAI ---
     OPENAI_API_KEY: str | None = None

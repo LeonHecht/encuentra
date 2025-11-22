@@ -1,0 +1,36 @@
+FROM python:3.11-slim
+
+# Quality-of-life and safer defaults
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PORT=8000
+
+# OS deps: certs for HTTPS (AOSS), curl for debugging/health if needed
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    curl \
+    && update-ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+# Project root in the container
+WORKDIR /app
+
+# Install Python deps first for better layer caching
+COPY backend/requirements.txt backend/requirements.txt
+RUN pip install --no-cache-dir --upgrade pip \
+    && pip install --no-cache-dir -r backend/requirements.txt
+
+# Copy only backend code and minimal runtime data
+COPY backend/ backend/
+# Include the static corpus so the default BM25/local modes can run
+COPY data/static_corpus/ data/static_corpus/
+
+# Create and use a non-root user
+RUN useradd -m appuser && chown -R appuser:appuser /app
+USER appuser
+
+# Expose FastAPI port (default)
+EXPOSE 8000
+
+# Start Uvicorn, honoring PORT if provided by the platform (e.g., App Runner)
+CMD ["sh", "-c", "uvicorn backend.app.main:app --host 0.0.0.0 --port ${PORT:-8000}"]

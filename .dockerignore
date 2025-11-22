@@ -1,0 +1,29 @@
+# Exclude VCS and editor files
+.git
+.gitignore
+.vscode/
+*.swp
+
+# Python cache
+**/__pycache__/
+**/*.pyc
+**/*.pyo
+
+# Node / frontend
+frontend/
+landing/
+node_modules/
+
+# Tests and local artifacts
+**/.pytest_cache/
+**/.mypy_cache/
+**/.ruff_cache/
+
+# Data: include only static_corpus (allowlisting below)
+data/
+!data/static_corpus/
+!data/static_corpus/**
+
+# OS / misc
+.DS_Store
+Thumbs.db
