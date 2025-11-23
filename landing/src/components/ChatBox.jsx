@@ -63,7 +63,7 @@ export default function ChatBox({ onSend, placeholder }) {
 
   return (
     <div className="w-full max-w-2xl mx-auto">
-      <div className="flex items-center gap-3 bg-white rounded-2xl px-3 py-2 border border-neutral-200 shadow-sm hover:bg-neutral-50 focus:bg-neutral-50 rounded-xl transition-colors">
+      <div className="flex items-center gap-3 bg-neutral-50 rounded-2xl px-3 py-2 hover:bg-neutral-100 focus:bg-neutral-100 rounded-xl transition-colors">
         <div className="flex-1 relative overflow-hidden flex items-center">
           <textarea
             ref={textareaRef}

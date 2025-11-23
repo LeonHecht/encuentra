@@ -1,6 +1,4 @@
-import { useForm, ValidationError } from '@formspree/react';
 import Navbar from './components/Navbar';
-import Countdown from './components/Countdown';
 import ChatBox from './components/ChatBox';
 
 export default function Landing() {
@@ -10,38 +8,36 @@ export default function Landing() {
       <Navbar />
 
       {/* hero / card */}
-      <main className="flex-1 flex items-center justify-center px-4">
-        <div className="
-            w-full max-w-md              /* móvil */
-            md:max-w-xl                  /* ≥768 px */
-            bg-white/90 md:bg-white/70   /* ligerísima transparencia sobre vídeo */
-            rounded-3xl shadow-xl
-            p-8 sm:p-10 space-y-8
-          ">
+      <main className="flex-1 flex flex-col px-4">
+        {/* Hero section fills remaining viewport height */}
+        <section className="flex-1 flex flex-col items-center justify-center">
+          <div className="flex flex-col gap-5 max-w-2xl w-full">
+            <h1 className="text-2xl sm:text-3xl font-extrabold text-center">
+              Encuentra – tu asistente legal con IA para El Salvador
+            </h1>
 
-          <h1 className="text-2xl sm:text-3xl font-extrabold text-center">
-            Encuentra – tu asistente legal con IA para El Salvador
-          </h1>
-
-          {/* Replaced waitlist form with ChatBox component */}
-          <div className="space-y-4">
-            <p className="text-center text-sm sm:text-base text-gray-600">
-              Busca jurisprudencia, chatea con IA y sube documentos legales, todo en un solo lugar.
-            </p>
-            <ChatBox
-              placeholder="Escribe tu mensaje..."
-              onSend={(msg) => {
-                // Simple redirect after sending; could include msg in querystring if desired.
-                const targetUrl = 'https://example.com/gracias';
-                window.location.href = targetUrl;
-              }}
-            />
+            {/* Replaced waitlist form with ChatBox component */}
+            <div className="space-y-20">
+              <p className="text-center text-sm sm:text-base text-gray-600">
+                Busca jurisprudencia, chatea con IA y sube documentos legales, todo en un solo lugar.
+              </p>
+              <ChatBox
+                onSend={(msg) => {
+                  // Simple redirect after sending; could include msg in querystring if desired.
+                  const targetUrl = 'https://example.com/gracias';
+                  window.location.href = targetUrl;
+                }}
+              />
+            </div>
           </div>
+        </section>
 
-          <p className="text-xs text-gray-400 text-center">
-            Únete a miles de abogados agilizando tu trabajo diario con IA. © 2025 Encuentra
-          </p>
-        </div>
+        {/* Future sections: feedback, features, etc. */}
+        <section className="py-16 space-y-10">
+          <div className="max-w-3xl mx-auto text-center text-gray-600 text-sm sm:text-base">
+            <p>Sección para testimonios, casos de uso y características del producto.</p>
+          </div>
+        </section>
       </main>
     </div>
   );
