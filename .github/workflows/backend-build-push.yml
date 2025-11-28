@@ -1,0 +1,38 @@
+name: backend-build-and-push
+
+on:
+  push:
+    branches: ['staging', 'prod'] # adjust 'prod' to 'master' if needed
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+    defaults:
+      run:
+        working-directory: backend
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::309642614800:role/GitHubActionsECRRole
+          aws-region: us-east-1 # e.g. eu-central-1
+
+      - name: Login to Amazon ECR
+        id: ecr-login
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build and push Docker image
+        env:
+          ECR_REGISTRY: ${{ steps.ecr-login.outputs.registry }}
+          ECR_REPOSITORY: encuentra-backend
+          IMAGE_TAG: ${{ github.ref_name }} # 'staging' or 'prod'
+        run: |
+          docker build -f ../Dockerfile.backend -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG ..
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
