@@ -26,6 +26,16 @@ from starlette.datastructures import UploadFile
 @pytest.fixture()
 def test_env(tmp_path, monkeypatch):
     """Prepare temp dirs, reset databases and index a small document."""
+    # Point CORPUS_PATH to a temporary directory with a tiny corpus.jsonl
+    corpus_dir = tmp_path / "static_corpus"
+    corpus_dir.mkdir(parents=True, exist_ok=True)
+    corpus_file = corpus_dir / "corpus.jsonl"
+    corpus_file.write_text(
+        '{"id": "1", "title": "Sentencia de resolucion", "text": "La resolucion del tribunal..."}\n',
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(settings, "CORPUS_PATH", str(corpus_dir))
+
     monkeypatch.setattr(settings, "DATA_UPLOAD", str(tmp_path / "uploads"))
     monkeypatch.setattr(files_ep, "UPLOADS_ROOT", Path(settings.DATA_UPLOAD))
     files_ep.UPLOADS_ROOT.mkdir(parents=True, exist_ok=True)

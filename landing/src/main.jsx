@@ -6,7 +6,7 @@ import Landing from './Landing';
 
 ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>
-    <BackgroundVideo />
+    {/* <BackgroundVideo /> */}
     <Landing />
   </React.StrictMode>,
 );

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import SpaceSelect from "@/components/SpaceSelect";
 import ChatSidebar from "@/components/ChatSidebar";
-import { useApi } from "@/hooks/useApi";
+import { apiFetch } from "@/hooks/useApi";
 import { supabase } from "@/lib/supabaseClient";
 import { SidebarProvider, SidebarTrigger, SidebarInset } from "@/components/ui/sidebar"
 
@@ -79,7 +79,7 @@ export default function Chat() {
 
   useEffect(() => {
     let alive = true;
-    useApi("user/spaces")
+    apiFetch("user/spaces")
       .then((d) => {
         if (!alive) return;
         const s: string[] = d.spaces || [];

@@ -1,7 +1,6 @@
 import { Link } from 'react-router-dom';
-import { motion } from 'framer-motion';
+// import { motion } from 'framer-motion';
 import { useAuth } from '../context/AuthContext';
-import logo from '../assets/logo_full-removebg.png';
 
 export default function Landing() {
   const { session } = useAuth();
@@ -13,23 +12,23 @@ export default function Landing() {
   return (
     <div className="h-screen flex flex-col items-center justify-center text-gray-900">
       {/* Animated headline (starts centred & large; settles smaller & higher) */}
-      <motion.div
-        initial={{ y: +30, scale: 1.6 }}
-        animate={{ y: -10, scale: 1 }}
-        transition={{ type: 'spring', stiffness: 80, damping: 16, duration: 1.1 }}
+      <div
+        // initial={{ y: +30, scale: 1.6 }}
+        // animate={{ y: -10, scale: 1 }}
+        // transition={{ type: 'spring', stiffness: 80, damping: 16, duration: 1.1 }}
         className="flex items-end"
       >
         <h1 className="text-6xl md:text-6xl font-semibold tracking-tight">
           {user && firstName ? `Hola, ${firstName}` : 'encuentra'}
         </h1>
         {/* <img src={logo} alt="Encuentra logo" className="w-64" /> */}
-      </motion.div>
+      </div>
 
       {/* Subtitle + buttons fade / slide in once headline settles */}
-      <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: 1.1, duration: 0.5 }}
+      <div
+        // initial={{ opacity: 0, y: 20 }}
+        // animate={{ opacity: 1, y: 0 }}
+        // transition={{ delay: 1.1, duration: 0.5 }}
         className="flex flex-col items-center mt-6 space-y-10"
       >
         <p className="text-xl md:text-2xl font-light text-center">
@@ -50,7 +49,7 @@ export default function Landing() {
             Chat
           </Link>
         </div>
-      </motion.div>
+      </div>
     </div>
   );
 }

@@ -2,8 +2,9 @@ name: ci
 
 on:
   pull_request:
+    branches: ['staging', 'master']
   push:
-    branches: ["**"]   # run on all branches (useful while setting up)
+    branches: ['staging', 'master']
 
 jobs:
   frontend:
@@ -32,7 +33,7 @@ jobs:
         run: npm run lint --if-present
 
       - name: Unit tests
-        run: npm test --if-present -- --ci
+        run: npm run test
         env:
           CI: true
 
@@ -42,6 +43,19 @@ jobs:
   backend:
     name: Backend (lint & tests)
     runs-on: ubuntu-latest
+    services:
+      opensearch:
+        image: opensearchproject/opensearch:2.11.0
+        env:
+          discovery.type: single-node
+          DISABLE_SECURITY_PLUGIN: 'true'
+        ports:
+          - 9200:9200
+        options: >-
+          --health-cmd="curl -sS http://localhost:9200 || exit 1"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=20
     defaults:
       run:
         working-directory: backend
@@ -51,7 +65,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: '3.11'
 
       - name: Cache pip
         uses: actions/cache@v4
@@ -63,8 +77,8 @@ jobs:
 
       - name: Install deps
         run: |
-          if [ -f "pyproject.toml" ]; then pip install -e .[dev]; fi
-          if [ -f "requirements.txt" ]; then pip install -r requirements.txt; fi
+          pip install -r requirements.txt
+          pip install pytest pytest-cov
 
       - name: Lint (ruff/flake8)
         run: |
@@ -79,6 +93,6 @@ jobs:
         run: pytest -q
         env:
           APP_ENV: test
-          # make sure unit tests don't hit real services:
+          # make sure unit tests don't hit real external services:
           SUPABASE_URL: http://localhost
-          OPENSEARCH_URL: http://localhost
+          OPENSEARCH_HOSTS: http://localhost:9200

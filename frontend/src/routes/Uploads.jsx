@@ -1,6 +1,6 @@
 import { useState } from "react";
 import SpaceSelect      from "@/components/SpaceSelect";
-import { useApi }       from "@/hooks/useApi";
+import { apiFetch }       from "@/hooks/useApi";
 import { createSpace }  from "@/api/createSpace";
 import IntegrationTabs  from "@/components/IntegrationTabs";
 
@@ -44,7 +44,7 @@ export default function Uploads() {
     fd.append("space", space);
 
     try {
-      const data = await useApi("upload", "", { method: "POST", body: fd });
+      const data = await apiFetch("upload", "", { method: "POST", body: fd });
       setMsg(`Subidos ${data.uploaded.length} archivo(s) en “${data.space}”.`);
       setFiles([]);
     } catch (err) {

@@ -6,6 +6,7 @@ from typing import Any
 import re
 import json
 import textwrap
+import os
 from openai import OpenAI
 from backend.app.core.config import settings
 from backend.app.services.search import search_engine
@@ -44,7 +45,22 @@ class AgenticChatRequest(BaseModel):
 
 
 router = APIRouter()
-client = OpenAI()
+# Lazy OpenAI client initialization to avoid startup failures when OPENAI_API_KEY is missing
+client: OpenAI | None = None
+
+def get_openai_client() -> OpenAI | None:
+    """Return a cached OpenAI client if OPENAI_API_KEY is configured, else None."""
+    global client
+    if client is not None:
+        return client
+    api_key = settings.OPENAI_API_KEY or os.getenv("OPENAI_API_KEY")
+    if not api_key:
+        return None
+    try:
+        client = OpenAI(api_key=api_key)
+        return client
+    except Exception:
+        return None
 
 FAST_SYS_PROMPT = """You are a helpful legal assistant for LATAM. Default to the user's language."""
 
@@ -113,57 +129,6 @@ emit_msg_tool = {
     "required": ["message"]
   }
 }
-
-# finalizer_tool = {
-#   "type": "function",
-#   "name": "submit_answer",
-#   "description": "Call this exactly once when you are completely done or need clarification from the user. It returns a response message to the user.",
-#   "parameters": {
-#     "type": "object",
-#     "properties": {
-#       "answer": { "type": "string", "description": "Response to user." },
-#       "citations": {
-#         "type": "array",
-#         "items": { "type": "object", "properties": {
-#           "doc_id": { "type": "string" },
-#           "snippet": { "type": "string" }
-#         } },
-#         "description": "Optional citations used in the answer."
-#       }
-#     },
-#     "required": ["answer"]
-#   }
-# }
-
-# report_trace_tool = {
-#     "type": "function",
-#     "name": "report_trace",
-#     "description": "Provide a brief, non-sensitive plan and the tools you intend to call next.",
-#     "parameters": {
-#         "type": "object",
-#         "properties": {
-#         "plan": {
-#             "type": "array",
-#             "items": { "type": "string" },
-#             "description": "2–6 concise bullets describing the approach. Give a short reason for each step.",
-#             "minItems": 1,
-#             "maxItems": 6
-#         },
-#         "intended_tools": {
-#             "type": "array",
-#             "items": { "type": "string", "enum": ["search_cases", "fetch_passages", "fetch_document"] },
-#             "description": "Which tools you’ll likely use, in rough order.",
-#             "minItems": 0,
-#             "maxItems": 5
-#         },
-#         "stop_condition": {
-#             "type": "string",
-#             "description": "When you’ll stop calling tools."
-#         }
-#         },
-#         "required": ["plan"]
-#     }
-# }
 
 tools = [
     emit_msg_tool,
@@ -311,91 +276,6 @@ def clip(s, max_chars=16000):
 def sse(event: str, data: Dict[str, Any]) -> str:
     return f"event: {event}\n" + f"data: {json.dumps(data, ensure_ascii=False)}\n\n"
 
-
-# DEPRECATED: use /chat/agentic instead
-@router.get("/chat/stream")
-# async def chat_stream(request: Request, response: Response, user=Depends(get_current_user)):
-async def chat_stream(request: Request, response: Response):
-    # print("Received /chat/stream request")
-
-    token = request.query_params.get("token")
-    # TODO: validate_token(token) -> raise HTTPException(401) if invalid
-
-    # Parse inputs
-    space = request.query_params.get("space") or ""
-    # print(f"Using space: '{space}'")
-    raw_messages = request.query_params.get("messages")
-    if not raw_messages:
-        raise HTTPException(status_code=400, detail="Missing messages")
-    
-    try:
-        msgs: List[Dict[str, str]] = json.loads(raw_messages)
-    except Exception:
-        raise HTTPException(status_code=400, detail="Invalid messages JSON")
-    
-    # Build your RAG context (doc-level retrieval like before)
-    hits = search_engine.search(msgs[-1]["content"], top_k=max(5, settings.MAX_DOCS), space=space)
-    citations = []
-    context_blocks = []
-    used_docs = 0
-    
-    for h in hits or []:
-        doc_id = h["id"]
-        doc = search_engine.get_document_by_id(space, doc_id)
-        if not doc:
-            continue
-        full_text = doc.get("text", "") or ""
-        if not full_text.strip():
-            continue
-
-        trimmed = full_text[: settings.MAX_DOC_TOKENS * 4]
-        title = (doc.get("title") or "").strip()
-        header = f"({doc_id}) {title}".strip() if title else f"({doc_id})"
-        block = f"[{used_docs+1}] {header}\n{trimmed}"
-        context_blocks.append(block)
-
-        citations.append({"doc_id": doc_id, "snippet": trimmed[:240]})
-        used_docs += 1
-        if used_docs >= settings.MAX_DOCS:
-            break
-
-    context_text = "\n\n---\n\n".join(context_blocks)
-    # print(f"Built context with {used_docs} documents, {len(context_text)} characters")
-
-    openai_messages = [
-        {"role": "system", "content": "Your are a legal assistant for El Salvador. Answer concisely and cite with [doc_id]."},
-        {"role": "user", "content": f"Pregunta: {msgs[-1]['content']}\n\nContexto:\n{context_text}\n\nInstrucciones: Responde conciso y cita con [doc_id]."},
-    ]
-
-    def gen():
-        try:
-            stream = client.chat.completions.create(
-                model=settings.OPENAI_CHAT_MODEL,
-                messages=openai_messages,
-                stream=True
-            )
-            parts = []
-            for chunk in stream:
-                delta = getattr(chunk.choices[0].delta, "content", None)
-                if delta:
-                    parts.append(delta)
-                    yield sse("content", {"delta": delta})
-            answer = "".join(parts)
-            yield sse("done", {"answer": answer, "citations": citations, "file_url": None})
-        except Exception as e:
-            yield sse("content", {"delta": f"\n[error] {str(e)}"})
-            yield sse("done", {"answer": "", "citations": [], "file_url": None})
-
-    # Good SSE headers (FastAPI sets content-type; add no-cache/keep-alive)
-    headers = {
-        "Cache-Control": "no-cache",
-        "Connection": "keep-alive",
-        # If you use cookies across origins:
-        # "Access-Control-Allow-Credentials": "true",
-    }
-    return StreamingResponse(gen(), media_type="text/event-stream", headers=headers)
-
-
 def normalize_title(raw: str | None, fallback: str | None) -> str | None:
     """Trim quotes/whitespace and cap to 5 words. Fallback to first 5 words of user msg if empty."""
     t = (raw or "").strip().strip('"').strip("'")
@@ -427,7 +307,10 @@ def extract_inline_citations(text: str):
 def get_title_for_chat(last_user_msg):
     try:
         # print("\n📝 **Generating Chat Title**")
-        response = client.responses.create(
+        oc = get_openai_client()
+        if oc is None:
+            raise RuntimeError("OPENAI_API_KEY not configured")
+        response = oc.responses.create(
             model="gpt-4.1-nano",
             instructions="Given this user's request, give the Chat a title that will be shown in the list of chats. Return a string of max 5 words. Don't return any additional content, just the title.",
             input=[{"role": "user", "content": last_user_msg[:200]}],
@@ -450,7 +333,10 @@ Also return 'reasoning_model' if the user's request requires external knowledge 
 Return 'fast_model' if the user's request is rather simple or a general knowledge question not requiring external facts or data.
 """
         # print("\n📝 **Deciding if to respond fast**")
-        response = client.responses.create(
+        oc = get_openai_client()
+        if oc is None:
+            return False
+        response = oc.responses.create(
             model="gpt-4.1-mini",
             instructions=instruction,
             input=[{"role": "user", "content": f"User request:\n{last_user_msg}"}],
@@ -645,7 +531,13 @@ async def chat_agentic_stream(req: AgenticChatRequest):
             else:
                 final_instructions = cfg.system_prompt
 
-            stream = client.responses.create(
+            oc = get_openai_client()
+            if oc is None:
+                # If OpenAI is not configured, fail fast with a clear SSE message
+                async for chunk in emit("response.completed", {"answer": "OpenAI is not configured.", "citations": [], "trace": [], "trace_len": 0, "agent_state": "[]"}):
+                    yield chunk
+                return
+            stream = oc.responses.create(
                 model=cfg.model,
                 instructions=final_instructions,
                 input=ctx.openai_messages,
