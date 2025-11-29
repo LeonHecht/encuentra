@@ -61,7 +61,7 @@ class Settings(BaseSettings):
     # If true, force a rebuild of indexes on startup (expensive for OpenSearch in staging/prod)
     FORCE_REINDEX_ON_STARTUP: bool = False
     # If true, skip rebuilding on startup unless the space is missing (recommended for staging/prod)
-    SKIP_REINDEX_ON_STARTUP: bool = False
+    SKIP_REINDEX_ON_STARTUP: bool = True
 
     # --- Supabase ---
     SUPABASE_URL: str | None = None
