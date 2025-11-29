@@ -2,7 +2,7 @@ name: backend-build-and-push
 
 on:
   push:
-    branches: ['staging', 'prod'] # adjust 'prod' to 'master' if needed
+    branches: ['staging', 'master']
 
 jobs:
   build-and-push:
@@ -22,7 +22,7 @@ jobs:
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: arn:aws:iam::309642614800:role/GitHubActionsECRRole
-          aws-region: us-east-1 # e.g. eu-central-1
+          aws-region: us-east-2
 
       - name: Login to Amazon ECR
         id: ecr-login
