@@ -48,7 +48,7 @@ You can run staging/prod on AWS OpenSearch Serverless using IAM role auth from A
    SEARCH_BACKEND=opensearch
 
    # AOSS + SigV4
-   OPENSEARCH_AWS_REGION=us-east-1
+   OPENSEARCH_AWS_REGION=us-east-2
    OPENSEARCH_AWS_SERVICE=aoss
    # Use your collection endpoint hostname
    OPENSEARCH_HOSTS=https://<collection-id>.<region>.aoss.amazonaws.com
