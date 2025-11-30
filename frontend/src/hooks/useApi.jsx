@@ -9,7 +9,8 @@ import { supabase } from "../lib/supabaseClient";
 export const apiFetch = async (path, params = "", options = {}) => {
   const { data: { session } } = await supabase.auth.getSession();
   const token = session?.access_token;
-  const API_BASE = import.meta.env.VITE_API_BASE || "http://localhost:8000";
+  // Normalize to avoid trailing slash that would produce URLs like //v1/...
+  const API_BASE = (import.meta.env.VITE_API_BASE || "http://localhost:8000").replace(/\/+$/, "");
 
   const headers = { ...(options.headers || {}) };
   if (token) headers["Authorization"] = `Bearer ${token}`;
