@@ -51,7 +51,8 @@ type ChatMsg = {
 };
 
 export default function Chat() {
-  const API_BASE = import.meta.env.VITE_API_BASE || "http://localhost:8000";
+  // Avoid double slashes when VITE_API_BASE ends with '/'
+  const API_BASE = (import.meta.env.VITE_API_BASE || "http://localhost:8000").replace(/\/+$/, "");
 
   const [title, setTitle] = useState<string>("");
   const [messages, setMessages] = useState<ChatMsg[]>([]);
