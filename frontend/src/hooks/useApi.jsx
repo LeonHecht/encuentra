@@ -9,11 +9,12 @@ import { supabase } from "../lib/supabaseClient";
 export const apiFetch = async (path, params = "", options = {}) => {
   const { data: { session } } = await supabase.auth.getSession();
   const token = session?.access_token;
+  const API_BASE = import.meta.env.VITE_API_BASE || "http://localhost:8000";
 
   const headers = { ...(options.headers || {}) };
   if (token) headers["Authorization"] = `Bearer ${token}`;
 
-  return fetch(`http://localhost:8000/v1/${path}${params}`, {
+  return fetch(`${API_BASE}/v1/${path}${params}`, {
     ...options,
     headers,
   }).then((res) => {
