@@ -1,6 +1,6 @@
 # Encuentra
 
-![Encuentra Logo](assets/encuentra_youtube.png)
+![Encuentra Logo](assets/logo_nobg-inverted.png)
 
 Full‑stack search and chat application with a FastAPI backend and React frontends.
 
