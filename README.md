@@ -1,7 +1,9 @@
 # Encuentra
 
 <!-- ![Encuentra Logo](assets/logo_nobg-inverted.png) -->
-<img src="assets/logo_nobg-inverted.png" alt="Encuentra Logo" width="400"/>
+<p align="center">
+    <img src="assets/logo_nobg-inverted.png" alt="Encuentra Logo" width="400"/>
+</p>
 
 Full‑stack search and chat application with a FastAPI backend and React frontends.
 
