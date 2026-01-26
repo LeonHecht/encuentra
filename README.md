@@ -4,6 +4,7 @@
 <p align="center">
     <img src="assets/logo_nobg-inverted.png" alt="Encuentra Logo" width="300"/>
 </p>
+
 <p align="center">
     <img src="assets/encuentra_screenshot.png" alt="Encuentra Screenshot" width="300"/>
 </p>
