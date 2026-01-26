@@ -1,5 +1,7 @@
 # Encuentra
 
+![Encuentra Logo](assets/encuentra_youtube.png)
+
 Full‑stack search and chat application with a FastAPI backend and React frontends.
 
 The project is organised as a monorepo:
