@@ -5,7 +5,7 @@
     <img src="assets/logo_nobg-inverted.png" alt="Encuentra Logo" width="300"/>
 </p>
 
-Full‑stack search and chat application with a FastAPI backend and React frontends.
+Full‑stack legal search and chat application with a FastAPI backend and React frontends.
 
 The project is organised as a monorepo:
 
