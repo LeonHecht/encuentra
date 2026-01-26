@@ -6,7 +6,7 @@
 </p>
 
 <p align="center">
-    <img src="assets/encuentra_screenshot.png" alt="Encuentra Screenshot" width="300"/>
+    <img src="assets/encuentra_screenshot.png" alt="Encuentra Screenshot"/>
 </p>
 
 Full‑stack legal search and chat application with a FastAPI backend and React frontends.
