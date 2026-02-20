@@ -101,11 +101,29 @@ export default function MarkdownWithCitations({ text, citations = [], apiBase, c
     } catch {}
 
     // Map items to full citation objects using the provided citations prop
-    // Goal: get the citation snippets that were provided by backend
+    // Goal: get the citation snippets and stable download URLs that were provided by backend
     const merged = items.map(({ doc, hint }) => {
       const cit = citations.find((c) => c.doc_id === doc);
       const title = cit?.title || `Documento ${doc}`;
-      const url = cit?.download_url || (apiBase ? `${apiBase}/files/${doc}.pdf` : undefined);
+
+      let url: string | undefined;
+      if (cit?.download_url) {
+        // If backend provided a relative URL (e.g. "/files/123.pdf"), resolve it against apiBase
+        // so that it always points at the API origin rather than the frontend dev server.
+        if (apiBase) {
+          try {
+            url = new URL(cit.download_url, apiBase).toString();
+          } catch {
+            url = cit.download_url;
+          }
+        } else {
+          url = cit.download_url;
+        }
+      } else if (apiBase) {
+        // Fallback for older chat logs that only carried doc_id
+        url = `${apiBase}/files/${doc}.pdf`;
+      }
+
       const snippet = cit?.snippet;
       return { doc, hint, title, url, snippet };
     });

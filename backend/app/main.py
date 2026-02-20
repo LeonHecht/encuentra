@@ -32,8 +32,8 @@ app.include_router(auth.router, prefix=f"/{settings.API_VERSION}")
 app.include_router(billing.router, prefix=f"/{settings.API_VERSION}")
 app.include_router(billing.router, prefix=f"/{settings.API_VERSION}")
 
-static_dir = Path(__file__).resolve().parent / "static" / "downloads"
-app.mount("/downloads", StaticFiles(directory=static_dir), name="downloads")
+static_dir = Path(__file__).resolve().parent.parent.parent / "data" / "static_corpus" / "files"
+app.mount("/files", StaticFiles(directory=static_dir), name="files")
 
 @app.get("/ping")
 def ping():
