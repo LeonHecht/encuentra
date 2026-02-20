@@ -34,34 +34,6 @@ export default function Search() {
   const [feedbackById, setFeedbackById] = useState({});
   const [toast, setToast] = useState({ docId: null, msg: "" });
 
-  // Highlight helper
-  const renderSnippet = (snippet) => {
-    const terms = Array.from(
-      new Set(
-        q
-          .toLowerCase()
-          .normalize("NFD")
-          .replace(/[\u0300-\u036f]/g, "")
-          .split(/[^A-Za-z]+/)
-          .filter(Boolean)
-      )
-    );
-    return snippet.split(" ").map((word, i) => {
-      const ascii = word
-        .normalize("NFD")
-        .replace(/[\u0300-\u036f]/g, "");
-      const clean = ascii.replace(/[^A-Za-z]/g, "").toLowerCase();
-      if (terms.includes(clean)) {
-        return (
-          <strong key={i} className="font-bold">
-            {word}{" "}
-          </strong>
-        );
-      }
-      return <span key={i}>{word} </span>;
-    });
-  };
-
   const onSearch = async () => {
     if (!q.trim()) return;
     setLoading(true);
@@ -150,7 +122,6 @@ export default function Search() {
                 </span>
 
                 <p className="mt-2 text-gray-700 text-sm">
-                  {/* {renderSnippet(res.snippet)} */}
                   {renderEmAsStrong(res.snippet)}
                   {res.snippet.split(" ").length >= 50 ? "…" : ""}
                 </p>
