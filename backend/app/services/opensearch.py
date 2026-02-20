@@ -213,7 +213,11 @@ class OpenSearchSearch:
         try:
             client = self._get_s3_client()
             prefix = str(prefix_raw).rstrip("/") + "/"
-            for ext in (".pdf", ".PDF", ".htm", ".html", ".HTML", ".docx", ".doc", ".txt"):
+            exts = (".pdf", ".PDF", ".htm", ".html", ".HTML", ".docx", ".doc", ".txt")
+
+            # 1) Fast path: try keys without any year/extra folders,
+            #    i.e. <prefix><doc_id><ext>
+            for ext in exts:
                 key = f"{prefix}{doc_id}{ext}"
                 try:
                     client.head_object(Bucket=bucket, Key=key)
@@ -227,6 +231,24 @@ class OpenSearchSearch:
                     )
                 except Exception:
                     return None
+
+            # 2) Fallback: handle layouts like "year/doc_id.ext" where doc_id
+            #    itself does not contain the year. We scan under the configured
+            #    prefix and look for any key that ends with "/<doc_id><ext>".
+            paginator = client.get_paginator("list_objects_v2")
+            for page in paginator.paginate(Bucket=bucket, Prefix=prefix):
+                for obj in page.get("Contents", []):
+                    k = obj.get("Key", "")
+                    for ext in exts:
+                        if k.endswith(f"/{doc_id}{ext}"):
+                            try:
+                                return client.generate_presigned_url(
+                                    "get_object",
+                                    Params={"Bucket": bucket, "Key": k},
+                                    ExpiresIn=int(getattr(settings, "S3_URL_TTL", 604800)),
+                                )
+                            except Exception:
+                                return None
         except Exception:
             return None
         return None
