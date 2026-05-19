@@ -1,4 +1,4 @@
-# Encuentra
+# Encuentra -- Full‑stack legal search and chat application with a FastAPI backend and React frontends.
 
 <!-- ![Encuentra Logo](assets/logo_nobg-inverted.png) -->
 <p align="center">
@@ -8,8 +8,6 @@
 <p align="center">
     <img src="assets/encuentra_screenshot.png" alt="Encuentra Screenshot"/>
 </p>
-
-Full‑stack legal search and chat application with a FastAPI backend and React frontends.
 
 The project is organised as a monorepo:
 
