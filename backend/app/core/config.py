@@ -3,11 +3,11 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    # Read env from an environment-specific file first (if present), then fallback to .env
-    # Set APP_ENV=production (or staging, etc.) to load .env.production before .env
+    # Read base .env first, then let an environment-specific file override it.
+    # Set APP_ENV=production (or staging, etc.) to load .env.production after .env.
     _env = os.getenv("APP_ENV", "local")
     model_config = SettingsConfigDict(
-        env_file=(f".env.{_env}", ".env"),
+        env_file=(".env", f".env.{_env}"),
         case_sensitive=False,
         extra="ignore",   # or "forbid" IF you list every possible env var here
     )

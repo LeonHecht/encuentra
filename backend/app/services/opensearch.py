@@ -79,13 +79,18 @@ class OpenSearchSearch:
                 "verify_certs": settings.OPENSEARCH_VERIFY_CERTS,
             }
 
+            use_sigv4 = self._uses_sigv4()
             aws_region = getattr(settings, "OPENSEARCH_AWS_REGION", None)
 
-            # --- Branch 1: AWS (Managed / Serverless via IAM + SigV4) ---
-            if aws_region:
+            # --- Branch 1: AWS-managed OpenSearch / Serverless via IAM + SigV4 ---
+            if use_sigv4:
                 if boto3 is None:
                     raise RuntimeError(
                         "boto3 is required for AWS OpenSearch IAM auth but is not installed."
+                    )
+                if not aws_region:
+                    raise RuntimeError(
+                        "OPENSEARCH_SIGV4=true requires OPENSEARCH_AWS_REGION to be set."
                     )
 
                 service = getattr(settings, "OPENSEARCH_AWS_SERVICE", "aoss")
@@ -106,7 +111,7 @@ class OpenSearchSearch:
                     }
                 )
 
-            # --- Branch 2: Local / non-AWS clusters (dev) ---
+            # --- Branch 2: Local / self-hosted clusters, including Docker on EC2 ---
             else:
                 auth = None
                 if settings.OPENSEARCH_USERNAME and settings.OPENSEARCH_PASSWORD:
@@ -136,12 +141,11 @@ class OpenSearchSearch:
         if client.indices.exists(index=index_name):
             return
 
-        # Base index settings, used for both local and AOSS
+        # Base index settings, used for both self-hosted clusters and AOSS.
         index_settings: dict[str, Any] = {}
-        service = getattr(settings, "OPENSEARCH_AWS_SERVICE", "aoss")
 
-        # Only set shards/replicas when NOT on Serverless
-        if service != "aoss":
+        # Only set shards/replicas when NOT on Serverless.
+        if not self._is_serverless():
             index_settings.update(
                 {
                     "number_of_shards": 1,
@@ -420,8 +424,11 @@ class OpenSearchSearch:
             self._s3_client = boto3.client("s3")
         return self._s3_client
     
+    def _uses_sigv4(self) -> bool:
+        return bool(getattr(settings, "OPENSEARCH_SIGV4", False))
+
     def _is_serverless(self):
-        return getattr(settings, "OPENSEARCH_AWS_SERVICE", "aoss") == "aoss" and getattr(settings, "OPENSEARCH_AWS_REGION", None)
+        return self._uses_sigv4() and getattr(settings, "OPENSEARCH_AWS_SERVICE", "aoss") == "aoss"
     
     # ------------------------------------------------------------------
     # Public API (mirrors BM25Search)
@@ -663,4 +670,3 @@ class OpenSearchSearch:
 
 
 opensearch_engine = OpenSearchSearch()
-
