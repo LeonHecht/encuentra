@@ -43,13 +43,19 @@ class Settings(BaseSettings):
     MAX_DOC_TOKENS: int = 2000
     MAX_DOCS: int = 3
 
+
     # --- S3 corpus/files (optional; used in staging/prod) ---
     # Bucket that holds corpus.jsonl and the original files
     S3_BUCKET: str | None = None
     # Object key for the corpus JSONL, e.g. "staging/corpus.jsonl" or "prod/corpus.jsonl"
+    # (legacy; optional if you index directly from S3 text files instead)
     S3_CORPUS_KEY: str | None = None
-    # Prefix for original files within the bucket, e.g. "staging/files/" or "prod/files/"
+    # Prefix for original files (PDFs, etc.) within the bucket, e.g. "staging/files/" or "prod/files/"
     S3_FILES_PREFIX: str | None = None
+    # Prefix for plain-text documents within the bucket, e.g. "staging/txt/" or "pdfs/text/txt/"
+    # When set (along with S3_BUCKET), the OpenSearch indexer will prefer reading .txt files
+    # from this prefix instead of relying on a corpus.jsonl file.
+    S3_TEXT_PREFIX: str | None = None
     # TTL in seconds for presigned URLs to original files
     S3_URL_TTL: int = 7 * 24 * 60 * 60  # default 7 days
     # Whether to generate S3 presigned URLs during indexing (expensive for large corpora)

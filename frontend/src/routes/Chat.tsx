@@ -532,7 +532,7 @@ export default function Chat() {
                           )}
                           {m.role === "assistant" && status === "streaming" && (!m.reasoning || m.reasoning.length === 0) && (m.text ?? "") === "" && (
                             <div className="mb-3 text-muted-foreground text-sm">
-                              <Shimmer duration={2} spread={4}>Iniciando…</Shimmer>
+                              <Shimmer duration={2} spread={4}>Analizando…</Shimmer>
                             </div>
                           )}
                           {m.role === "assistant" ? (

@@ -56,7 +56,7 @@ export const InlineCitationCard = (props: InlineCitationCardProps) => (
 );
 
 export type InlineCitationCardTriggerProps = ComponentProps<typeof Badge> & {
-  sources?: string[]; // optional URLs for hostname fallback
+  sources?: string[]; // optional URLs for hostname fallback and click target
   ids?: string[];     // optional doc ids to display like "DocID: 12345 +N"
   label?: string;     // explicit label override
 };
@@ -66,6 +66,7 @@ export const InlineCitationCardTrigger = ({
   ids = [],
   label,
   className,
+  onClick,
   ...props
 }: InlineCitationCardTriggerProps) => {
   let text: string = "unknown";
@@ -82,11 +83,31 @@ export const InlineCitationCardTrigger = ({
     }
   }
 
+  const handleClick: React.MouseEventHandler<HTMLDivElement> = (event) => {
+    // Preserve any consumer-provided click handler first
+    if (onClick) {
+      onClick(event as any);
+    }
+    if (event.defaultPrevented) return;
+
+    const targetUrl = sources[0];
+    if (!targetUrl) return;
+
+    try {
+      window.open(targetUrl, "_blank", "noopener,noreferrer");
+    } catch {
+      // Fallback: assign location (avoids throwing in odd environments)
+      window.location.href = targetUrl;
+    }
+  };
+
   return (
     <HoverCardTrigger asChild>
       <Badge
-        className={cn("ml-1 rounded-full", className)}
+        className={cn("ml-1 rounded-full cursor-pointer", className)}
+        onClick={handleClick}
         variant="secondary"
+        title="Da clic para abrir caso."
         {...props}
       >
         {text}

@@ -3,6 +3,19 @@ import { apiFetch } from "@/hooks/useApi";
 import SpaceSelect  from "@/components/SpaceSelect";
 
 
+// Base URL for backend API (used to build absolute download links)
+const API_BASE = (import.meta.env.VITE_API_BASE || "http://localhost:8000").replace(/\/+$/, "");
+
+// Convert OpenSearch highlight tags <em>...</em> to React nodes with <strong>...
+function renderEmAsStrong(snippet) {
+  const parts = snippet.split(/(<em>.*?<\/em>)/g);
+  return parts.map((part, idx) => {
+    const m = part.match(/^<em>(.*?)<\/em>$/);
+    if (m) return <b key={idx}>{m[1]}</b>;
+    return <span key={idx}>{part}</span>;
+  });
+}
+
 export default function Search() {
   const [q, setQ]           = useState("");
   const [_spaces, setSpaces] = useState([]);
@@ -20,34 +33,6 @@ export default function Search() {
   const [loading, setLoading] = useState(false);
   const [feedbackById, setFeedbackById] = useState({});
   const [toast, setToast] = useState({ docId: null, msg: "" });
-
-  // Highlight helper
-  const renderSnippet = (snippet) => {
-    const terms = Array.from(
-      new Set(
-        q
-          .toLowerCase()
-          .normalize("NFD")
-          .replace(/[\u0300-\u036f]/g, "")
-          .split(/[^A-Za-z]+/)
-          .filter(Boolean)
-      )
-    );
-    return snippet.split(" ").map((word, i) => {
-      const ascii = word
-        .normalize("NFD")
-        .replace(/[\u0300-\u036f]/g, "");
-      const clean = ascii.replace(/[^A-Za-z]/g, "").toLowerCase();
-      if (terms.includes(clean)) {
-        return (
-          <strong key={i} className="font-bold">
-            {word}{" "}
-          </strong>
-        );
-      }
-      return <span key={i}>{word} </span>;
-    });
-  };
 
   const onSearch = async () => {
     if (!q.trim()) return;
@@ -137,18 +122,18 @@ export default function Search() {
                 </span>
 
                 <p className="mt-2 text-gray-700 text-sm">
-                  {renderSnippet(res.snippet)}
+                  {renderEmAsStrong(res.snippet)}
                   {res.snippet.split(" ").length >= 50 ? "…" : ""}
                 </p>
 
                 <div className="mt-3 flex items-center space-x-2">
                   {res.download_url && (
                     <a
-                    href={res.download_url}
-                    target="_blank"
+                      href={new URL(res.download_url, API_BASE).toString()}
+                      target="_blank"
                       rel="noreferrer"
                       className="px-4 py-2 bg-gray-200 rounded hover:bg-gray-100"
-                      >
+                    >
                       Download Full Case
                     </a>
                   )}
