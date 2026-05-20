@@ -213,7 +213,11 @@ class OpenSearchSearch:
         try:
             client = self._get_s3_client()
             prefix = str(prefix_raw).rstrip("/") + "/"
-            for ext in (".pdf", ".PDF", ".htm", ".html", ".HTML", ".docx", ".doc", ".txt"):
+            exts = (".pdf", ".PDF", ".htm", ".html", ".HTML", ".docx", ".doc", ".txt")
+
+            # 1) Fast path: try keys without any year/extra folders,
+            #    i.e. <prefix><doc_id><ext>
+            for ext in exts:
                 key = f"{prefix}{doc_id}{ext}"
                 try:
                     client.head_object(Bucket=bucket, Key=key)
@@ -227,6 +231,24 @@ class OpenSearchSearch:
                     )
                 except Exception:
                     return None
+
+            # 2) Fallback: handle layouts like "year/doc_id.ext" where doc_id
+            #    itself does not contain the year. We scan under the configured
+            #    prefix and look for any key that ends with "/<doc_id><ext>".
+            paginator = client.get_paginator("list_objects_v2")
+            for page in paginator.paginate(Bucket=bucket, Prefix=prefix):
+                for obj in page.get("Contents", []):
+                    k = obj.get("Key", "")
+                    for ext in exts:
+                        if k.endswith(f"/{doc_id}{ext}"):
+                            try:
+                                return client.generate_presigned_url(
+                                    "get_object",
+                                    Params={"Bucket": bucket, "Key": k},
+                                    ExpiresIn=int(getattr(settings, "S3_URL_TTL", 604800)),
+                                )
+                            except Exception:
+                                return None
         except Exception:
             return None
         return None
@@ -235,8 +257,50 @@ class OpenSearchSearch:
         documents: list[dict[str, Any]] = []
 
         if space == "supreme_court":
-            # Try S3 first if configured
-            if getattr(settings, "S3_BUCKET", None) and getattr(settings, "S3_CORPUS_KEY", None) and boto3 is not None:
+            # Preferred path: S3 plain-text files (e.g. pdfs/text/txt/year/doc_id.txt)
+            if (
+                getattr(settings, "S3_BUCKET", None)
+                and getattr(settings, "S3_TEXT_PREFIX", None)
+                and boto3 is not None
+            ):
+                try:
+                    client = self._get_s3_client()
+                    bucket = settings.S3_BUCKET
+                    prefix = str(settings.S3_TEXT_PREFIX).rstrip("/") + "/"
+                    paginator = client.get_paginator("list_objects_v2")
+
+                    for page in paginator.paginate(Bucket=bucket, Prefix=prefix):
+                        for obj in page.get("Contents", []):
+                            key = obj.get("Key", "")
+                            if not key.lower().endswith(".txt"):
+                                continue
+                            filename = key.rsplit("/", 1)[-1]
+                            doc_id = filename.rsplit(".", 1)[0] or filename
+
+                            try:
+                                text_obj = client.get_object(Bucket=bucket, Key=key)
+                                raw_bytes = text_obj["Body"].read()
+                                try:
+                                    text = raw_bytes.decode("utf-8")
+                                except Exception:
+                                    text = raw_bytes.decode("latin-1", errors="ignore")
+                            except Exception:
+                                continue
+
+                            documents.append(
+                                {
+                                    "id": doc_id,
+                                    "title": doc_id,
+                                    "text": text,
+                                    "space": space,
+                                    "download_url": self._resolve_download_url(doc_id),
+                                }
+                            )
+                except Exception as e:
+                    print(f"[OpenSearch] Failed to load text documents from S3: {e}. Falling back to corpus.jsonl.")
+
+            # Legacy path: S3 corpus.jsonl, if configured and no text docs were loaded
+            if not documents and getattr(settings, "S3_BUCKET", None) and getattr(settings, "S3_CORPUS_KEY", None) and boto3 is not None:
                 try:
                     client = self._get_s3_client()
                     obj = client.get_object(Bucket=settings.S3_BUCKET, Key=settings.S3_CORPUS_KEY)
