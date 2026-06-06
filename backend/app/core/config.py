@@ -13,18 +13,15 @@ class Settings(BaseSettings):
     )
 
     # --- Core ---
-    CORPUS_PATH: str = "./data/static_corpus"
-    SEARCH_BACKEND: str = "bm25"
-
     APP_ENV: str = "local"
     API_VERSION: str = "v1"
     PORT: int = 8000
-    ALLOWED_ORIGINS: str ="http://localhost:5173"
+    ALLOWED_ORIGINS: str = "http://localhost:5173"
     CORPUS_PATH: str = "data/static_corpus"
     DATA_UPLOAD: str = "backend/app/api/data/user_uploads"
 
     # Search backend configuration
-    SEARCH_BACKEND: str = "opensearch"  # bm25 | opensearch
+    SEARCH_BACKEND: str = "opensearch"  # opensearch | bm25
     OPENSEARCH_HOSTS: str = "http://localhost:9200"
     OPENSEARCH_TIMEOUT: int = 30
     OPENSEARCH_VERIFY_CERTS: bool = False

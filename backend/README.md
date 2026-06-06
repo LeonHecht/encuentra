@@ -2,13 +2,14 @@
 
 The API can run either entirely in memory using the bundled BM25 index or
 delegate search to an external OpenSearch cluster. The backend is selected via
-the `SEARCH_BACKEND` environment variable (`bm25` by default).
+the `SEARCH_BACKEND` environment variable (`opensearch` by default in this repo).
 
-### Using the in-memory BM25 engine (default)
+### Using the in-memory BM25 engine
 
 No additional setup is required; the application will load
 `data/static_corpus/corpus.jsonl` at startup and keep all indexes in memory. The
-same code path is still used by the test suite.
+same code path is still used by parts of the test suite. Set
+`SEARCH_BACKEND=bm25` to use this mode.
 
 ### Using OpenSearch
 
@@ -41,9 +42,12 @@ search cluster while retaining the local developer experience.
 
 Staging/prod can point at a normal OpenSearch node running in Docker on an EC2
 instance. This uses the same non-SigV4 client path as local development; only
-the host changes.
+the host changes. The reusable files live in `../infra/ec2-opensearch`.
 
-1. Run OpenSearch on the EC2 instance. Example single-node container:
+1. Run OpenSearch on the EC2 instance. You can use
+   `../infra/ec2-opensearch/user-data.sh` as EC2 user data, or copy
+   `../infra/ec2-opensearch/docker-compose.yml` to the instance and run
+   `docker compose up -d`. Equivalent single-container command:
 
    ```bash
    docker run -d --name encuentra-opensearch \
@@ -62,6 +66,8 @@ the host changes.
    OPENSEARCH_SIGV4=false
    OPENSEARCH_VERIFY_CERTS=false
    OPENSEARCH_INDEX_PREFIX=encuentra-stg
+   SKIP_REINDEX_ON_STARTUP=true
+   FORCE_REINDEX_ON_STARTUP=false
    ```
 
 3. Networking: if the API also runs in AWS, prefer the EC2 private IP/private
@@ -131,3 +137,6 @@ OPENSEARCH_HOSTS=http://localhost:9200
 OPENSEARCH_SIGV4=false
 ALLOWED_ORIGINS=http://localhost:5173
 ```
+
+Use `FORCE_REINDEX_ON_STARTUP=true` for a one-time rebuild. Switch it back to
+`false` afterward to avoid rebuilding the OpenSearch index on every deploy.
