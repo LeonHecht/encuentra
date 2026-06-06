@@ -5,7 +5,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PORT=8000
 
-# OS deps: certs for HTTPS (AOSS), curl for debugging/health if needed
+# OS deps: certs for HTTPS OpenSearch/S3 endpoints, curl for debugging/health if needed
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     curl \
