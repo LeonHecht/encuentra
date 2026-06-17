@@ -20,6 +20,11 @@ fi
 
 systemctl enable --now docker
 
+sysctl -w vm.max_map_count=262144
+cat > /etc/sysctl.d/99-encuentra-opensearch.conf <<'EOF'
+vm.max_map_count=262144
+EOF
+
 if docker compose version >/dev/null 2>&1; then
   COMPOSE_CMD=(docker compose)
 elif command -v docker-compose >/dev/null 2>&1; then
@@ -41,7 +46,7 @@ services:
       - "9600:9600"
     environment:
       discovery.type: single-node
-      plugins.security.disabled: "true"
+      DISABLE_SECURITY_PLUGIN: "true"
       OPENSEARCH_JAVA_OPTS: "-Xms1g -Xmx1g"
     ulimits:
       memlock:
@@ -67,7 +72,7 @@ else
     --restart unless-stopped \
     -p 9200:9200 -p 9600:9600 \
     -e discovery.type=single-node \
-    -e plugins.security.disabled=true \
+    -e DISABLE_SECURITY_PLUGIN=true \
     -e OPENSEARCH_JAVA_OPTS="-Xms1g -Xmx1g" \
     --ulimit memlock=-1:-1 \
     --ulimit nofile=65536:65536 \
