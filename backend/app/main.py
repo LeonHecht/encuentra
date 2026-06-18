@@ -33,7 +33,8 @@ app.include_router(billing.router, prefix=f"/{settings.API_VERSION}")
 app.include_router(billing.router, prefix=f"/{settings.API_VERSION}")
 
 static_dir = Path(__file__).resolve().parent.parent.parent / "data" / "static_corpus" / "files"
-app.mount("/files", StaticFiles(directory=static_dir), name="files")
+if static_dir.exists():
+    app.mount("/files", StaticFiles(directory=static_dir), name="files")
 
 @app.get("/ping")
 def ping():
