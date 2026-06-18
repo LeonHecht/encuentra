@@ -1,29 +1,30 @@
-# Exclude VCS and editor files
 .git
-.gitignore
-.vscode/
-*.swp
+.agents
+.codex
+.venv
+venv
+env
+__pycache__
+*.pyc
+.pytest_cache
+.mypy_cache
 
-# Python cache
-**/__pycache__/
-**/*.pyc
-**/*.pyo
+.env
+.env.*
+!.env.example
+!.env.*.example
 
-# Node / frontend
-frontend/
-landing/
-node_modules/
+data/static_corpus
+backend/app/api/data/user_uploads
 
-# Tests and local artifacts
-**/.pytest_cache/
-**/.mypy_cache/
-**/.ruff_cache/
+frontend/node_modules
+frontend/dist
+frontend/build
+landing/node_modules
+landing/dist
+landing/build
+node_modules
 
-# Data: include only static_corpus (allowlisting below)
-data/
-!data/static_corpus/
-!data/static_corpus/**
-
-# OS / misc
-.DS_Store
-Thumbs.db
+*.log
+landing_src.txt
+project_sources.txt
