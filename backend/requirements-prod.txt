@@ -11,5 +11,10 @@ python-dotenv==1.1.0
 python-multipart==0.0.20
 rank-bm25==0.2.2
 supabase==2.22.0
+supabase-auth==2.22.0
+postgrest==2.22.0
+realtime==2.22.0
+storage3==2.22.0
+supabase-functions==2.22.0
 uvicorn==0.34.3
 uvloop==0.21.0
