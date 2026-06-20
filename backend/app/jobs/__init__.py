@@ -1,0 +1,1 @@
+"""One-off OpenSearch indexing jobs."""

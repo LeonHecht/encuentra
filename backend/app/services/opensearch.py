@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import json
 import re
+import time
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable
 from urllib.parse import urlparse
@@ -179,6 +181,10 @@ class OpenSearchSearch:
                     },
                     "space": {"type": "keyword"},
                     "download_url": {"type": "keyword"},
+                    "s3_text_key": {"type": "keyword"},
+                    "s3_text_etag": {"type": "keyword"},
+                    "s3_last_modified": {"type": "date"},
+                    "indexed_at": {"type": "date"},
                 }
             },
         }
@@ -402,6 +408,74 @@ class OpenSearchSearch:
                 "_source": doc,
             }
 
+    def _s3_doc_id(self, key: str) -> str:
+        filename = key.rsplit("/", 1)[-1]
+        stem = filename.rsplit(".", 1)[0] or filename
+        safe = re.sub(r"[^A-Za-z0-9_.-]+", "-", stem).strip("-")
+        return safe or str(abs(hash(key)))
+
+    def _iter_s3_text_objects(self):
+        if boto3 is None:
+            raise RuntimeError("boto3 is required for S3 indexing but is not installed.")
+        bucket = getattr(settings, "S3_BUCKET", None)
+        prefix_raw = getattr(settings, "S3_TEXT_PREFIX", None)
+        if not bucket or not prefix_raw:
+            raise RuntimeError("S3_BUCKET and S3_TEXT_PREFIX are required for S3 incremental indexing.")
+
+        client = self._get_s3_client()
+        prefix = str(prefix_raw).rstrip("/") + "/"
+        paginator = client.get_paginator("list_objects_v2")
+        for page in paginator.paginate(Bucket=bucket, Prefix=prefix):
+            for obj in page.get("Contents", []):
+                key = obj.get("Key", "")
+                if key.lower().endswith(".txt"):
+                    yield obj
+
+    def _existing_s3_etag(self, client: OpenSearch, index_name: str, doc_id: str) -> str | None:
+        try:
+            existing = client.get(index=index_name, id=doc_id, _source_includes=["s3_text_etag"])
+        except NotFoundError:
+            return None
+        except Exception:
+            return None
+        source = existing.get("_source", {}) or {}
+        return source.get("s3_text_etag")
+
+    def _load_s3_text_doc(self, obj: dict[str, Any], space: str) -> dict[str, Any] | None:
+        bucket = settings.S3_BUCKET
+        key = obj.get("Key")
+        if not bucket or not key:
+            return None
+
+        client = self._get_s3_client()
+        try:
+            text_obj = client.get_object(Bucket=bucket, Key=key)
+            raw_bytes = text_obj["Body"].read()
+            try:
+                text = raw_bytes.decode("utf-8")
+            except Exception:
+                text = raw_bytes.decode("latin-1", errors="ignore")
+        except Exception as e:
+            print(f"[OpenSearch] Failed to read s3://{bucket}/{key}: {e}")
+            return None
+
+        doc_id = self._s3_doc_id(key)
+        etag = str(obj.get("ETag", "")).strip('"')
+        last_modified = obj.get("LastModified")
+        last_modified_value = last_modified.isoformat() if hasattr(last_modified, "isoformat") else None
+
+        return {
+            "id": doc_id,
+            "title": doc_id,
+            "text": text,
+            "space": space,
+            "download_url": self._resolve_download_url(doc_id),
+            "s3_text_key": key,
+            "s3_text_etag": etag,
+            "s3_last_modified": last_modified_value,
+            "indexed_at": datetime.now(timezone.utc).isoformat(),
+        }
+
     def _wait_for_cluster(self, timeout=30):
         c = self._get_client()
         import time
@@ -486,6 +560,154 @@ class OpenSearchSearch:
             print(f"[OpenSearch] Indexed {len(documents)} docs into alias '{alias}' via '{build_name}'.")
         else:
             print(f"[OpenSearch] Indexed {len(documents)} docs into serverless index '{build_name}'.")
+
+    def index_incremental(
+        self,
+        space: str = "supreme_court",
+        delete_missing: bool | None = None,
+        progress_every: int = 500,
+    ) -> dict[str, int]:
+        """Incrementally index S3 text files into the stable space index.
+
+        Intended for one-off ECS jobs, not FastAPI startup. Stores S3 key/ETag
+        metadata and skips documents whose ETag is unchanged.
+        """
+        if space != "supreme_court":
+            raise RuntimeError("Incremental S3 indexing is currently only supported for supreme_court.")
+        if not getattr(settings, "S3_BUCKET", None) or not getattr(settings, "S3_TEXT_PREFIX", None):
+            raise RuntimeError("S3_BUCKET and S3_TEXT_PREFIX must be configured for incremental indexing.")
+
+        progress_every = max(1, progress_every)
+        started_at = time.monotonic()
+
+        print(f"[OpenSearch] Starting incremental indexing for space '{space}'.", flush=True)
+        if not self._is_serverless():
+            self._wait_for_cluster()
+
+        client = self._get_client()
+        index_name = self._alias_name(space)
+        self._create_index_if_needed(client, index_name)
+
+        delete_missing = (
+            getattr(settings, "OPENSEARCH_DELETE_MISSING_S3_DOCS", False)
+            if delete_missing is None
+            else delete_missing
+        )
+
+        seen_ids: set[str] = set()
+        stats = {
+            "seen": 0,
+            "skipped": 0,
+            "indexed": 0,
+            "failed": 0,
+            "deleted": 0,
+            "bytes_seen": 0,
+            "bytes_indexed": 0,
+        }
+
+        def log_progress(label: str) -> None:
+            elapsed = max(time.monotonic() - started_at, 0.001)
+            files_per_min = stats["seen"] / (elapsed / 60)
+            mb_seen = stats["bytes_seen"] / (1024 * 1024)
+            mb_indexed = stats["bytes_indexed"] / (1024 * 1024)
+            print(
+                "[OpenSearch] "
+                f"{label}: seen={stats['seen']} indexed={stats['indexed']} "
+                f"skipped={stats['skipped']} failed={stats['failed']} deleted={stats['deleted']} "
+                f"scanned={mb_seen:.1f}MiB changed={mb_indexed:.1f}MiB "
+                f"elapsed={elapsed:.0f}s rate={files_per_min:.1f} files/min.",
+                flush=True,
+            )
+
+        print(
+            "[OpenSearch] Incremental source: "
+            f"s3://{settings.S3_BUCKET}/{str(settings.S3_TEXT_PREFIX).rstrip('/')}/ -> "
+            f"index '{index_name}', progress_every={progress_every}, delete_missing={delete_missing}.",
+            flush=True,
+        )
+
+        def actions():
+            for obj in self._iter_s3_text_objects():
+                stats["seen"] += 1
+                size = int(obj.get("Size") or 0)
+                stats["bytes_seen"] += size
+
+                key = obj.get("Key", "")
+                doc_id = self._s3_doc_id(key)
+                seen_ids.add(doc_id)
+                etag = str(obj.get("ETag", "")).strip('"')
+
+                if etag and self._existing_s3_etag(client, index_name, doc_id) == etag:
+                    stats["skipped"] += 1
+                    if stats["seen"] % progress_every == 0:
+                        log_progress("progress")
+                    continue
+
+                doc = self._load_s3_text_doc(obj, space)
+                if not doc:
+                    stats["failed"] += 1
+                    if stats["seen"] % progress_every == 0:
+                        log_progress("progress")
+                    continue
+
+                stats["indexed"] += 1
+                stats["bytes_indexed"] += size
+                if stats["seen"] % progress_every == 0:
+                    log_progress("progress")
+
+                yield {
+                    "_op_type": "index",
+                    "_index": index_name,
+                    "_id": doc["id"],
+                    "_source": doc,
+                }
+
+        helpers.bulk(
+            client,
+            actions(),
+            chunk_size=settings.OPENSEARCH_BULK_CHUNK_SIZE,
+            refresh="wait_for",
+            raise_on_error=False,
+            raise_on_exception=False,
+        )
+        log_progress("bulk indexing finished")
+
+        if delete_missing:
+            print("[OpenSearch] Checking for indexed S3 documents missing from current S3 listing.", flush=True)
+            response = client.search(
+                index=index_name,
+                body={
+                    "size": 10000,
+                    "_source": False,
+                    "query": {"exists": {"field": "s3_text_key"}},
+                },
+                scroll="2m",
+            )
+            scroll_id = response.get("_scroll_id")
+            while True:
+                hits = response.get("hits", {}).get("hits", [])
+                if not hits:
+                    break
+                delete_actions = [
+                    {"_op_type": "delete", "_index": index_name, "_id": hit["_id"]}
+                    for hit in hits
+                    if hit.get("_id") not in seen_ids
+                ]
+                if delete_actions:
+                    for ok, _ in helpers.streaming_bulk(client, delete_actions, raise_on_error=False):
+                        if ok:
+                            stats["deleted"] += 1
+                            if stats["deleted"] % progress_every == 0:
+                                log_progress("delete progress")
+                if not scroll_id:
+                    break
+                response = client.scroll(scroll_id=scroll_id, scroll="2m")
+                scroll_id = response.get("_scroll_id")
+            if scroll_id:
+                client.clear_scroll(scroll_id=scroll_id, ignore=[404])
+
+        log_progress("incremental indexing complete")
+        return stats
 
     def has_space(self, space: str) -> bool:
         """Return True if the logical space exists (alias or index)."""
