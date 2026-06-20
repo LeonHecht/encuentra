@@ -434,9 +434,11 @@ class OpenSearchSearch:
     # Public API (mirrors BM25Search)
     # ------------------------------------------------------------------
     def index(self, space: str = "supreme_court") -> None:
+        print(f"[OpenSearch] Starting indexing for space '{space}'...")
         if not self._is_serverless():
             self._wait_for_cluster()
         
+        print(f"[OpenSearch] Loading documents for space '{space}'...")
         client = self._get_client()
         alias = self._alias_name(space)
 
@@ -444,7 +446,8 @@ class OpenSearchSearch:
         if not documents:
             print(f"[OpenSearch] No documents to index for space '{space}'.")
             return
-
+        
+        print(f"[OpenSearch] Indexing {len(documents)} documents for space '{space}' into OpenSearch...")
         build_name = (
             alias if self._is_serverless() else self._build_index_name(space, suffix=str(int(__import__("time").time())))
         )
