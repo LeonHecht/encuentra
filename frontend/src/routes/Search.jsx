@@ -113,9 +113,10 @@ export default function Search() {
               <div className="relative">
                 <div className="flex justify-between items-center">
                   <h3 className="text-lg font-semibold">{res.title}</h3>
-                  <span className="text-sm font-mono text-gray-500">
-                    ID: {res.id}
-                  </span>
+                  <div className="text-sm font-mono text-gray-500 text-right">
+                    {res.case_year && <div>Año: {res.case_year}</div>}
+                    <div>ID: {res.id}</div>
+                  </div>
                 </div>
                 <span className="text-sm font-semibold text-indigo-600">
                   Score: {res.score.toFixed(3)}

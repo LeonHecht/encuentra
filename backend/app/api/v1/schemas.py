@@ -14,6 +14,7 @@ class SearchResult(BaseModel):
     id: str
     score: float
     title: str | None = Field(default=None)   # <- allow None
+    case_year: int | None = None
     snippet: str | None = None
     download_url: str | None = None
 
