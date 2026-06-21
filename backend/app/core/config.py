@@ -28,7 +28,7 @@ class Settings(BaseSettings):
     OPENSEARCH_INDEX_PREFIX: str = "encuentra"
     OPENSEARCH_BULK_CHUNK_SIZE: int = 500   # Send 500 documents per HTTP request to _bulk
     OPENSEARCH_SEARCH_TIMEOUT: int = 10
-    OPENSEARCH_ENABLE_HIGHLIGHTS: bool = False
+    OPENSEARCH_ENABLE_HIGHLIGHTS: bool = True
     OPENSEARCH_HIGHLIGHT_FRAGMENT_SIZE: int = 200
     OPENSEARCH_SIGV4: bool = False
     OPENSEARCH_USERNAME: str | None = None
@@ -69,7 +69,7 @@ class Settings(BaseSettings):
     # --- Indexing controls ---
     # If false, the web API never indexes during FastAPI startup. Use the
     # dedicated indexing job for large corpora in staging/prod.
-    INDEX_ON_STARTUP: bool = True
+    INDEX_ON_STARTUP: bool = False
     # If true, force a rebuild of indexes on startup (expensive for OpenSearch in staging/prod)
     FORCE_REINDEX_ON_STARTUP: bool = False
     # If true, skip rebuilding on startup unless the space is missing (recommended for staging/prod)

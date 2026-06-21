@@ -182,6 +182,7 @@ class OpenSearchSearch:
                     "space": {"type": "keyword"},
                     "download_url": {"type": "keyword"},
                     "s3_text_key": {"type": "keyword"},
+                    "s3_file_key": {"type": "keyword"},
                     "s3_text_etag": {"type": "keyword"},
                     "s3_last_modified": {"type": "date"},
                     "indexed_at": {"type": "date"},
@@ -210,9 +211,45 @@ class OpenSearchSearch:
                 return f"/files/{candidate.name}"
         return None
 
+    def _presign_key(self, key: str | None) -> str | None:
+        if boto3 is None or not key:
+            return None
+        bucket = getattr(settings, "S3_BUCKET", None)
+        if not bucket:
+            return None
+        try:
+            return self._get_s3_client().generate_presigned_url(
+                "get_object",
+                Params={"Bucket": bucket, "Key": key},
+                ExpiresIn=int(getattr(settings, "S3_URL_TTL", 604800)),
+            )
+        except Exception:
+            return None
+
+    def _s3_file_key_from_text_key(self, text_key: str | None) -> str | None:
+        if not text_key:
+            return None
+        text_prefix_raw = getattr(settings, "S3_TEXT_PREFIX", None)
+        files_prefix_raw = getattr(settings, "S3_FILES_PREFIX", None)
+        if not text_prefix_raw or not files_prefix_raw:
+            return None
+
+        text_prefix = str(text_prefix_raw).rstrip("/") + "/"
+        files_prefix = str(files_prefix_raw).rstrip("/") + "/"
+        if not text_key.startswith(text_prefix):
+            return None
+
+        relative = text_key[len(text_prefix):]
+        if not relative:
+            return None
+        stem = relative.rsplit(".", 1)[0] if "." in relative else relative
+        return f"{files_prefix}{stem}.pdf"
+
     def _presign_by_id(self, doc_id: str) -> str | None:
-        """Attempt to generate a presigned S3 URL for a given document id.
-        Tries a set of known extensions and returns the first existing object's URL.
+        """Legacy fallback for old index documents without s3_file_key.
+
+        This scans nested S3 prefixes and is intentionally not used by normal
+        search results. Prefer _presign_key(source["s3_file_key"]).
         """
         if boto3 is None:
             return None
@@ -225,40 +262,21 @@ class OpenSearchSearch:
             prefix = str(prefix_raw).rstrip("/") + "/"
             exts = (".pdf", ".PDF", ".htm", ".html", ".HTML", ".docx", ".doc", ".txt")
 
-            # 1) Fast path: try keys without any year/extra folders,
-            #    i.e. <prefix><doc_id><ext>
             for ext in exts:
                 key = f"{prefix}{doc_id}{ext}"
                 try:
                     client.head_object(Bucket=bucket, Key=key)
                 except ClientError:
                     continue
-                try:
-                    return client.generate_presigned_url(
-                        "get_object",
-                        Params={"Bucket": bucket, "Key": key},
-                        ExpiresIn=int(getattr(settings, "S3_URL_TTL", 604800)),
-                    )
-                except Exception:
-                    return None
+                return self._presign_key(key)
 
-            # 2) Fallback: handle layouts like "year/doc_id.ext" where doc_id
-            #    itself does not contain the year. We scan under the configured
-            #    prefix and look for any key that ends with "/<doc_id><ext>".
             paginator = client.get_paginator("list_objects_v2")
             for page in paginator.paginate(Bucket=bucket, Prefix=prefix):
                 for obj in page.get("Contents", []):
                     k = obj.get("Key", "")
                     for ext in exts:
                         if k.endswith(f"/{doc_id}{ext}"):
-                            try:
-                                return client.generate_presigned_url(
-                                    "get_object",
-                                    Params={"Bucket": bucket, "Key": k},
-                                    ExpiresIn=int(getattr(settings, "S3_URL_TTL", 604800)),
-                                )
-                            except Exception:
-                                return None
+                            return self._presign_key(k)
         except Exception:
             return None
         return None
@@ -431,15 +449,18 @@ class OpenSearchSearch:
                 if key.lower().endswith(".txt"):
                     yield obj
 
-    def _existing_s3_etag(self, client: OpenSearch, index_name: str, doc_id: str) -> str | None:
+    def _existing_s3_metadata(self, client: OpenSearch, index_name: str, doc_id: str) -> dict[str, Any]:
         try:
-            existing = client.get(index=index_name, id=doc_id, _source_includes=["s3_text_etag"])
+            existing = client.get(
+                index=index_name,
+                id=doc_id,
+                _source_includes=["s3_text_etag", "s3_file_key"],
+            )
         except NotFoundError:
-            return None
+            return {}
         except Exception:
-            return None
-        source = existing.get("_source", {}) or {}
-        return source.get("s3_text_etag")
+            return {}
+        return existing.get("_source", {}) or {}
 
     def _load_s3_text_doc(self, obj: dict[str, Any], space: str) -> dict[str, Any] | None:
         bucket = settings.S3_BUCKET
@@ -463,14 +484,17 @@ class OpenSearchSearch:
         etag = str(obj.get("ETag", "")).strip('"')
         last_modified = obj.get("LastModified")
         last_modified_value = last_modified.isoformat() if hasattr(last_modified, "isoformat") else None
+        s3_file_key = self._s3_file_key_from_text_key(key)
+        download_url = self._presign_key(s3_file_key) if getattr(settings, "S3_PRESIGN_ON_INDEX", False) else None
 
         return {
             "id": doc_id,
             "title": doc_id,
             "text": text,
             "space": space,
-            "download_url": self._resolve_download_url(doc_id),
+            "download_url": download_url,
             "s3_text_key": key,
+            "s3_file_key": s3_file_key,
             "s3_text_etag": etag,
             "s3_last_modified": last_modified_value,
             "indexed_at": datetime.now(timezone.utc).isoformat(),
@@ -636,8 +660,14 @@ class OpenSearchSearch:
                 doc_id = self._s3_doc_id(key)
                 seen_ids.add(doc_id)
                 etag = str(obj.get("ETag", "")).strip('"')
+                expected_file_key = self._s3_file_key_from_text_key(key)
+                existing = self._existing_s3_metadata(client, index_name, doc_id)
 
-                if etag and self._existing_s3_etag(client, index_name, doc_id) == etag:
+                if (
+                    etag
+                    and existing.get("s3_text_etag") == etag
+                    and existing.get("s3_file_key") == expected_file_key
+                ):
                     stats["skipped"] += 1
                     if stats["seen"] % progress_every == 0:
                         log_progress("progress")
@@ -733,7 +763,7 @@ class OpenSearchSearch:
             "size": top_k,
             "timeout": f"{settings.OPENSEARCH_SEARCH_TIMEOUT}s",
             "track_total_hits": False,
-            "_source": {"includes": ["id", "title", "download_url"]},
+            "_source": {"includes": ["id", "title", "download_url", "s3_file_key"]},
             "query": {
                 "multi_match": {
                     "query": query,
@@ -769,7 +799,7 @@ class OpenSearchSearch:
                 snippet = source.get("title", "")
             dl_url = source.get("download_url")
             if not dl_url and getattr(settings, "S3_PRESIGN_ON_SEARCH", False):
-                dl_url = self._presign_by_id(source.get("id") or hit.get("_id"))
+                dl_url = self._presign_key(source.get("s3_file_key"))
             hits.append(
                 {
                     "id": source.get("id") or hit.get("_id"),
@@ -792,7 +822,7 @@ class OpenSearchSearch:
         source = doc.get("_source", {})
         dl_url = source.get("download_url")
         if not dl_url and getattr(settings, "S3_PRESIGN_ON_QUERY", True):
-            dl_url = self._presign_by_id(doc_id)
+            dl_url = self._presign_key(source.get("s3_file_key")) or self._presign_by_id(doc_id)
         return {
             "id": doc_id,
             "title": source.get("title", ""),
@@ -852,7 +882,7 @@ class OpenSearchSearch:
                     }
                 },
             },
-            "_source": {"includes": ["id", "title", "download_url"]},
+            "_source": {"includes": ["id", "title", "download_url", "s3_file_key"]},
         }
 
         res = client.search(index=target_index, body=body)
@@ -865,9 +895,10 @@ class OpenSearchSearch:
 
         passages = []
         for i, frag in enumerate(frags[:per_id]):
-            dl_url = hit.get("_source", {}).get("download_url")
+            source = hit.get("_source", {})
+            dl_url = source.get("download_url")
             if not dl_url and getattr(settings, "S3_PRESIGN_ON_QUERY", True):
-                dl_url = self._presign_by_id(doc_id)
+                dl_url = self._presign_key(source.get("s3_file_key")) or self._presign_by_id(doc_id)
             passages.append(
                 {
                     "doc_id": doc_id,
