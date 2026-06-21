@@ -1,3 +1,5 @@
+import traceback
+
 from fastapi import APIRouter, Query, HTTPException, Depends
 # from typing import List, Dict
 from ..schemas import SearchResponse, SearchResult
@@ -20,13 +22,20 @@ def search(
     space: str = Query(..., min_length=1, description="Contexto: supreme_court|my_uploads|<other>"),
     user: UserData = Depends(get_current_user),
 ):
-    print(f"Received search query: '{q}' in space '{space}' with top_k={top_k}")
+    print(f"Received search query: '{q}' in space '{space}' with top_k={top_k}", flush=True)
     if space not in get_accessible_spaces(user):
         raise HTTPException(403, detail="Space not accessible")
-    if not search_engine.has_space(space):
-        raise HTTPException(400, detail=f"Unknown space '{space}'")
-    hits = search_engine.search(q, top_k, space)
-    results = [SearchResult(**hit) for hit in hits]
+    try:
+        if not search_engine.has_space(space):
+            raise HTTPException(400, detail=f"Unknown space '{space}'")
+        hits = search_engine.search(q, top_k, space)
+        results = [SearchResult(**hit) for hit in hits]
+    except HTTPException:
+        raise
+    except Exception as exc:
+        print(f"Search failed for query '{q}' in space '{space}': {exc}", flush=True)
+        traceback.print_exc()
+        raise HTTPException(503, detail="Search backend unavailable") from exc
     return SearchResponse(query_log_id=1, results=results)
 
 # @router.post("/search", response_model=SearchResponse, summary="Run a BM25 or transformer search")
