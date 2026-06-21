@@ -27,6 +27,9 @@ class Settings(BaseSettings):
     OPENSEARCH_VERIFY_CERTS: bool = False
     OPENSEARCH_INDEX_PREFIX: str = "encuentra"
     OPENSEARCH_BULK_CHUNK_SIZE: int = 500   # Send 500 documents per HTTP request to _bulk
+    OPENSEARCH_SEARCH_TIMEOUT: int = 10
+    OPENSEARCH_ENABLE_HIGHLIGHTS: bool = False
+    OPENSEARCH_HIGHLIGHT_FRAGMENT_SIZE: int = 200
     OPENSEARCH_SIGV4: bool = False
     OPENSEARCH_USERNAME: str | None = None
     OPENSEARCH_PASSWORD: str | None = None

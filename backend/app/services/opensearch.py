@@ -731,6 +731,9 @@ class OpenSearchSearch:
 
         body = {
             "size": top_k,
+            "timeout": f"{settings.OPENSEARCH_SEARCH_TIMEOUT}s",
+            "track_total_hits": False,
+            "_source": {"includes": ["id", "title", "download_url"]},
             "query": {
                 "multi_match": {
                     "query": query,
@@ -738,28 +741,32 @@ class OpenSearchSearch:
                     "type": "best_fields",
                 }
             },
-            "highlight": {
+        }
+
+        if settings.OPENSEARCH_ENABLE_HIGHLIGHTS:
+            body["highlight"] = {
                 "fields": {
                     "text": {
-                        "fragment_size": 200,
+                        "fragment_size": settings.OPENSEARCH_HIGHLIGHT_FRAGMENT_SIZE,
                         "number_of_fragments": 1,
                     }
                 }
-            },
-        }
+            }
 
-        response = client.search(index=target_index, body=body)
+        response = client.search(
+            index=target_index,
+            body=body,
+            request_timeout=settings.OPENSEARCH_SEARCH_TIMEOUT,
+        )
         hits: list[dict[str, Any]] = []
         for hit in response.get("hits", {}).get("hits", []):
             source = hit.get("_source", {})
             snippet = ""
             highlight = hit.get("highlight", {}).get("text")
             if highlight:
-                snippet = " … ".join(highlight)
+                snippet = " ... ".join(highlight)
             else:
-                text = source.get("text", "")
-                snippet = " ".join(text.split()[:50])
-            # Lazily presign S3 URLs at query time if missing in index
+                snippet = source.get("title", "")
             dl_url = source.get("download_url")
             if not dl_url and getattr(settings, "S3_PRESIGN_ON_QUERY", True):
                 dl_url = self._presign_by_id(source.get("id") or hit.get("_id"))
@@ -792,7 +799,7 @@ class OpenSearchSearch:
             "text": source.get("text", ""),
             "download_url": dl_url,
         }
-    
+
     def fetch_passages(
         self,
         *,
@@ -801,11 +808,11 @@ class OpenSearchSearch:
         query: str,
         per_id: int = 3,
         max_tokens: int = 350,
-        chars_per_token: int = 4,   # ≈ Spanish tokens; tweak if you like
+        chars_per_token: int = 4,
     ) -> list[dict]:
         """
-        Return up to `per_id` passages from the given doc (id=doc_id) that best match `query`.
-        Each passage is ~`max_tokens` tokens (approx via chars_per_token).
+        Return up to `per_id` passages from the given doc that best match `query`.
+        Each passage is approximately `max_tokens` tokens.
         """
         client = self._get_client()
         alias = self._alias_name(space)
@@ -817,20 +824,21 @@ class OpenSearchSearch:
         fragment_size = max(128, min(8192, int(max_tokens * chars_per_token)))
 
         body = {
-            "size": 1,  # we only need this one doc
+            "size": 1,
             "query": {
                 "bool": {
                     "must": [
-                        {"term": {"id": doc_id}},            # restrict to this doc
-                        {"multi_match": {                     # score relevance within the doc
-                            "query": query,
-                            "fields": ["title^2", "text"],
-                            "type": "best_fields",
-                        }},
+                        {"term": {"id": doc_id}},
+                        {
+                            "multi_match": {
+                                "query": query,
+                                "fields": ["title^2", "text"],
+                                "type": "best_fields",
+                            }
+                        },
                     ]
                 }
             },
-            # highlighter extracts top fragments by score
             "highlight": {
                 "order": "score",
                 "fields": {
@@ -838,13 +846,12 @@ class OpenSearchSearch:
                         "type": "unified",
                         "fragment_size": fragment_size,
                         "number_of_fragments": per_id,
-                        "no_match_size": fragment_size,  # fallback if no term hits
+                        "no_match_size": fragment_size,
                         "pre_tags": ["<em>"],
                         "post_tags": ["</em>"],
                     }
-                }
+                },
             },
-            # optional: fetch the _score and only a small part of _source
             "_source": {"includes": ["id", "title", "download_url"]},
         }
 
@@ -856,24 +863,23 @@ class OpenSearchSearch:
         hit = hits[0]
         frags = hit.get("highlight", {}).get("text", []) or []
 
-        # Build normalized passages
         passages = []
         for i, frag in enumerate(frags[:per_id]):
-            # Lazily presign S3 URLs if missing
             dl_url = hit.get("_source", {}).get("download_url")
             if not dl_url and getattr(settings, "S3_PRESIGN_ON_QUERY", True):
                 dl_url = self._presign_by_id(doc_id)
-            passages.append({
-                "doc_id": doc_id,
-                "rank": i + 1,
-                "passage": frag,      # contains <em> .. </em> around matched terms
-                "approx_tokens": fragment_size // chars_per_token,
-                "score": float(hit.get("_score") or 0.0),
-                "title": hit.get("_source", {}).get("title", ""),
-                "download_url": dl_url,
-            })
+            passages.append(
+                {
+                    "doc_id": doc_id,
+                    "rank": i + 1,
+                    "passage": frag,
+                    "approx_tokens": fragment_size // chars_per_token,
+                    "score": float(hit.get("_score") or 0.0),
+                    "title": hit.get("_source", {}).get("title", ""),
+                    "download_url": dl_url,
+                }
+            )
 
-        # If the highlighter produced nothing (rare), fallback to the beginning of the doc
         if not passages:
             print("[OpenSearch] Highlighter returned no passages; only returning snippet of document.")
             doc = self.get_document_by_id(space, doc_id)
@@ -881,15 +887,17 @@ class OpenSearchSearch:
                 return []
             text = doc.get("text", "") or ""
             snippet = text[:fragment_size]
-            passages = [{
-                "doc_id": doc_id,
-                "rank": 1,
-                "passage": snippet,
-                "approx_tokens": fragment_size // chars_per_token,
-                "score": 0.0,
-                "title": doc.get("title", ""),
-                "download_url": doc.get("download_url"),
-            }]
+            passages = [
+                {
+                    "doc_id": doc_id,
+                    "rank": 1,
+                    "passage": snippet,
+                    "approx_tokens": fragment_size // chars_per_token,
+                    "score": 0.0,
+                    "title": doc.get("title", ""),
+                    "download_url": doc.get("download_url"),
+                }
+            ]
 
         return passages
 
