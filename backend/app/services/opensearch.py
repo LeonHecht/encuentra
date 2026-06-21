@@ -768,7 +768,7 @@ class OpenSearchSearch:
             else:
                 snippet = source.get("title", "")
             dl_url = source.get("download_url")
-            if not dl_url and getattr(settings, "S3_PRESIGN_ON_QUERY", True):
+            if not dl_url and getattr(settings, "S3_PRESIGN_ON_SEARCH", False):
                 dl_url = self._presign_by_id(source.get("id") or hit.get("_id"))
             hits.append(
                 {
