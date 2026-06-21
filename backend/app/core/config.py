@@ -60,9 +60,9 @@ class Settings(BaseSettings):
     S3_URL_TTL: int = 7 * 24 * 60 * 60  # default 7 days
     # Whether to generate S3 presigned URLs during indexing (expensive for large corpora)
     S3_PRESIGN_ON_INDEX: bool = False
-    # Whether search results should include presigned file URLs. Keep this false
-    # for large S3 corpora; per-result lookup can be expensive if files are nested.
-    S3_PRESIGN_ON_SEARCH: bool = False
+    # Whether search results should include presigned file URLs. This is cheap
+    # when documents have s3_file_key populated by the incremental indexer.
+    S3_PRESIGN_ON_SEARCH: bool = True
     # Whether to generate S3 presigned URLs at query time (recommended)
     S3_PRESIGN_ON_QUERY: bool = True
 

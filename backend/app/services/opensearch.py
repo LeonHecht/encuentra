@@ -180,6 +180,7 @@ class OpenSearchSearch:
                         "analyzer": "spanish_default",
                     },
                     "space": {"type": "keyword"},
+                    "case_year": {"type": "integer"},
                     "download_url": {"type": "keyword"},
                     "s3_text_key": {"type": "keyword"},
                     "s3_file_key": {"type": "keyword"},
@@ -217,33 +218,66 @@ class OpenSearchSearch:
         bucket = getattr(settings, "S3_BUCKET", None)
         if not bucket:
             return None
-        try:
-            return self._get_s3_client().generate_presigned_url(
-                "get_object",
-                Params={"Bucket": bucket, "Key": key},
-                ExpiresIn=int(getattr(settings, "S3_URL_TTL", 604800)),
-            )
-        except Exception:
-            return None
 
-    def _s3_file_key_from_text_key(self, text_key: str | None) -> str | None:
-        if not text_key:
-            return None
+        client = self._get_s3_client()
+        candidate_keys = [key]
+        if key.endswith(".pdf"):
+            candidate_keys.append(f"{key[:-4]}.PDF")
+
+        for candidate_key in candidate_keys:
+            try:
+                client.head_object(Bucket=bucket, Key=candidate_key)
+                return client.generate_presigned_url(
+                    "get_object",
+                    Params={"Bucket": bucket, "Key": candidate_key},
+                    ExpiresIn=int(getattr(settings, "S3_URL_TTL", 604800)),
+                )
+            except Exception:
+                continue
+        return None
+
+    def _s3_relative_text_path(self, text_key: str | None) -> str | None:
         text_prefix_raw = getattr(settings, "S3_TEXT_PREFIX", None)
-        files_prefix_raw = getattr(settings, "S3_FILES_PREFIX", None)
-        if not text_prefix_raw or not files_prefix_raw:
+        if not text_key or not text_prefix_raw:
             return None
-
         text_prefix = str(text_prefix_raw).rstrip("/") + "/"
-        files_prefix = str(files_prefix_raw).rstrip("/") + "/"
         if not text_key.startswith(text_prefix):
             return None
-
         relative = text_key[len(text_prefix):]
+        return relative or None
+
+    def _s3_file_key_from_text_key(self, text_key: str | None) -> str | None:
+        files_prefix_raw = getattr(settings, "S3_FILES_PREFIX", None)
+        relative = self._s3_relative_text_path(text_key)
+        if not files_prefix_raw or not relative:
+            return None
+
+        files_prefix = str(files_prefix_raw).rstrip("/") + "/"
+        stem = relative.rsplit(".", 1)[0] if "." in relative else relative
+        return f"{files_prefix}{stem}.PDF"
+
+    def _year_from_relative_s3_path(self, relative: str | None) -> int | None:
         if not relative:
             return None
-        stem = relative.rsplit(".", 1)[0] if "." in relative else relative
-        return f"{files_prefix}{stem}.pdf"
+        first_part = relative.split("/", 1)[0]
+        if len(first_part) == 4 and first_part.isdigit():
+            return int(first_part)
+        return None
+
+    def _s3_case_year_from_text_key(self, text_key: str | None) -> int | None:
+        return self._year_from_relative_s3_path(self._s3_relative_text_path(text_key))
+
+    def _s3_case_year_from_file_key(self, file_key: str | None) -> int | None:
+        files_prefix_raw = getattr(settings, "S3_FILES_PREFIX", None)
+        if not file_key or not files_prefix_raw:
+            return None
+        files_prefix = str(files_prefix_raw).rstrip("/") + "/"
+        if not file_key.startswith(files_prefix):
+            return None
+        return self._year_from_relative_s3_path(file_key[len(files_prefix):])
+
+    def _case_year_from_source(self, source: dict[str, Any]) -> int | None:
+        return source.get("case_year") or self._s3_case_year_from_file_key(source.get("s3_file_key"))
 
     def _presign_by_id(self, doc_id: str) -> str | None:
         """Legacy fallback for old index documents without s3_file_key.
@@ -454,7 +488,7 @@ class OpenSearchSearch:
             existing = client.get(
                 index=index_name,
                 id=doc_id,
-                _source_includes=["s3_text_etag", "s3_file_key"],
+                _source_includes=["s3_text_etag", "s3_file_key", "case_year"],
             )
         except NotFoundError:
             return {}
@@ -485,6 +519,7 @@ class OpenSearchSearch:
         last_modified = obj.get("LastModified")
         last_modified_value = last_modified.isoformat() if hasattr(last_modified, "isoformat") else None
         s3_file_key = self._s3_file_key_from_text_key(key)
+        case_year = self._s3_case_year_from_text_key(key)
         download_url = self._presign_key(s3_file_key) if getattr(settings, "S3_PRESIGN_ON_INDEX", False) else None
 
         return {
@@ -492,6 +527,7 @@ class OpenSearchSearch:
             "title": doc_id,
             "text": text,
             "space": space,
+            "case_year": case_year,
             "download_url": download_url,
             "s3_text_key": key,
             "s3_file_key": s3_file_key,
@@ -661,12 +697,14 @@ class OpenSearchSearch:
                 seen_ids.add(doc_id)
                 etag = str(obj.get("ETag", "")).strip('"')
                 expected_file_key = self._s3_file_key_from_text_key(key)
+                expected_case_year = self._s3_case_year_from_text_key(key)
                 existing = self._existing_s3_metadata(client, index_name, doc_id)
 
                 if (
                     etag
                     and existing.get("s3_text_etag") == etag
                     and existing.get("s3_file_key") == expected_file_key
+                    and existing.get("case_year") == expected_case_year
                 ):
                     stats["skipped"] += 1
                     if stats["seen"] % progress_every == 0:
@@ -763,7 +801,7 @@ class OpenSearchSearch:
             "size": top_k,
             "timeout": f"{settings.OPENSEARCH_SEARCH_TIMEOUT}s",
             "track_total_hits": False,
-            "_source": {"includes": ["id", "title", "download_url", "s3_file_key"]},
+            "_source": {"includes": ["id", "title", "case_year", "download_url", "s3_file_key"]},
             "query": {
                 "multi_match": {
                     "query": query,
@@ -804,6 +842,7 @@ class OpenSearchSearch:
                 {
                     "id": source.get("id") or hit.get("_id"),
                     "title": source.get("title", ""),
+                    "case_year": self._case_year_from_source(source),
                     "score": float(hit.get("_score") or 0.0),
                     "snippet": snippet,
                     "download_url": dl_url,
@@ -826,6 +865,7 @@ class OpenSearchSearch:
         return {
             "id": doc_id,
             "title": source.get("title", ""),
+            "case_year": self._case_year_from_source(source),
             "text": source.get("text", ""),
             "download_url": dl_url,
         }
@@ -882,7 +922,7 @@ class OpenSearchSearch:
                     }
                 },
             },
-            "_source": {"includes": ["id", "title", "download_url", "s3_file_key"]},
+            "_source": {"includes": ["id", "title", "case_year", "download_url", "s3_file_key"]},
         }
 
         res = client.search(index=target_index, body=body)
