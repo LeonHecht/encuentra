@@ -61,10 +61,16 @@ class Settings(BaseSettings):
     S3_PRESIGN_ON_QUERY: bool = True
 
     # --- Indexing controls ---
+    # If false, the web API never indexes during FastAPI startup. Use the
+    # dedicated indexing job for large corpora in staging/prod.
+    INDEX_ON_STARTUP: bool = True
     # If true, force a rebuild of indexes on startup (expensive for OpenSearch in staging/prod)
     FORCE_REINDEX_ON_STARTUP: bool = False
     # If true, skip rebuilding on startup unless the space is missing (recommended for staging/prod)
     SKIP_REINDEX_ON_STARTUP: bool = True
+    # If true, incremental indexing deletes OpenSearch docs whose S3 text keys
+    # no longer exist. Keep false until you are confident the S3 prefix is correct.
+    OPENSEARCH_DELETE_MISSING_S3_DOCS: bool = False
 
     # --- Supabase ---
     SUPABASE_URL: str | None = None

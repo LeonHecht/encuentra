@@ -50,6 +50,10 @@ def on_startup():
     - Default (both false): always index the main corpus space and any upload spaces
       (preserves previous local dev behavior).
     """
+    if not settings.INDEX_ON_STARTUP:
+        print('[startup] INDEX_ON_STARTUP=false; skipping search indexing.')
+        return
+
     force = settings.FORCE_REINDEX_ON_STARTUP
     skip = settings.SKIP_REINDEX_ON_STARTUP
 
