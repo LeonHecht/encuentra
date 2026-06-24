@@ -72,16 +72,19 @@ export default function SearchResultCard({ result, space, feedback, onFeedback }
   const [metadataStatus, setMetadataStatus] = useState(result.metadata_status || "missing");
   const [metadata, setMetadata] = useState(result.metadata || null);
   const [expanded, setExpanded] = useState(false);
+  const [pollingPaused, setPollingPaused] = useState(false);
 
   useEffect(() => {
     setMetadataStatus(result.metadata_status || "missing");
     setMetadata(result.metadata || null);
     setExpanded(false);
+    setPollingPaused(false);
   }, [result.id, result.metadata_status, result.metadata]);
 
   useEffect(() => {
-    if (metadataStatus !== "pending" || metadata) return undefined;
+    if (metadataStatus !== "pending" || metadata || pollingPaused) return undefined;
 
+    const maxPollingAttempts = 30;
     let attempts = 0;
     const intervalId = setInterval(async () => {
       attempts += 1;
@@ -95,18 +98,26 @@ export default function SearchResultCard({ result, space, feedback, onFeedback }
           setMetadata(response.metadata);
           clearInterval(intervalId);
         }
-        if (response.status === "failed" || attempts >= 10) {
+        if (response.status === "failed") {
+          clearInterval(intervalId);
+        }
+        if (attempts >= maxPollingAttempts) {
+          setPollingPaused(true);
           clearInterval(intervalId);
         }
       } catch {
-        if (attempts >= 10) clearInterval(intervalId);
+        if (attempts >= maxPollingAttempts) {
+          setPollingPaused(true);
+          clearInterval(intervalId);
+        }
       }
     }, 3000);
 
     return () => clearInterval(intervalId);
-  }, [metadataStatus, metadata, result.id, space]);
+  }, [metadataStatus, metadata, pollingPaused, result.id, space]);
 
   const isMetadataPending = metadataStatus === "pending" && !metadata;
+  const isMetadataFailed = metadataStatus === "failed" && !metadata;
   const title = metadata?.generated_title || result.title || result.id;
   const court = metadata?.court_chamber;
   const typeTags = useMemo(
