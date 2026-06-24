@@ -117,7 +117,6 @@ export default function SearchResultCard({ result, space, feedback, onFeedback }
   }, [metadataStatus, metadata, pollingPaused, result.id, space]);
 
   const isMetadataPending = metadataStatus === "pending" && !metadata;
-  const isMetadataFailed = metadataStatus === "failed" && !metadata;
   const title = metadata?.generated_title || result.title || result.id;
   const court = metadata?.court_chamber;
   const typeTags = useMemo(
