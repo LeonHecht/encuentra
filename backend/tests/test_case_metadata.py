@@ -51,7 +51,6 @@ def test_search_attaches_ready_metadata(monkeypatch):
 def test_search_enqueues_missing_metadata(monkeypatch):
     enqueued = []
     monkeypatch.setattr(search_ep.settings, "CASE_METADATA_AUTO_ENRICH", True)
-    monkeypatch.setattr(search_ep.settings, "CASE_METADATA_TOP_K", 3)
     monkeypatch.setattr(search_ep, "get_accessible_spaces", lambda user: ["supreme_court"])
     monkeypatch.setattr(search_ep.search_engine, "has_space", lambda space: True)
     monkeypatch.setattr(
@@ -62,9 +61,16 @@ def test_search_enqueues_missing_metadata(monkeypatch):
                 "id": "A1",
                 "title": "A1",
                 "score": 1.0,
-                "snippet": "snippet",
+                "snippet": "snippet-1",
                 "download_url": None,
-            }
+            },
+            {
+                "id": "A2",
+                "title": "A2",
+                "score": 0.9,
+                "snippet": "snippet-2",
+                "download_url": None,
+            },
         ],
     )
     monkeypatch.setattr(search_ep.case_metadata, "get_metadata_rows", lambda space, doc_ids: {})
@@ -77,14 +83,14 @@ def test_search_enqueues_missing_metadata(monkeypatch):
 
     response = search_ep.search(
         q="hurto",
-        top_k=1,
+        top_k=2,
         space="supreme_court",
         background_tasks=FakeBackgroundTasks(),
         user=_user(),
     )
 
-    assert response.results[0].metadata_status == "pending"
-    assert enqueued == [("supreme_court", "A1", "hurto", "snippet")]
+    assert [result.metadata_status for result in response.results] == ["pending", "pending"]
+    assert enqueued == [("supreme_court", "A1", "hurto", "snippet-1"), ("supreme_court", "A2", "hurto", "snippet-2")]
 
 
 def test_metadata_endpoint_rejects_inaccessible_space(monkeypatch):

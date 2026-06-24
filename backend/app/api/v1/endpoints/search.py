@@ -35,6 +35,7 @@ def search(
         doc_ids = [str(hit.get("id")) for hit in hits if hit.get("id")]
         metadata_rows = case_metadata.get_metadata_rows(space, doc_ids)
         scheduled = 0
+        enrichment_limit = len(hits)
         for hit in hits:
             doc_id = str(hit.get("id") or "")
             row = metadata_rows.get(doc_id)
@@ -42,7 +43,7 @@ def search(
             hit["metadata_status"] = status
             hit["metadata"] = row.get("metadata") if row and status == "ready" else None
 
-            if settings.CASE_METADATA_AUTO_ENRICH and scheduled < settings.CASE_METADATA_TOP_K and status in ("missing", "pending", "failed"):
+            if settings.CASE_METADATA_AUTO_ENRICH and scheduled < enrichment_limit and status in ("missing", "pending", "failed"):
                 try:
                     should_enqueue = case_metadata.upsert_pending(space, doc_id, row)
                 except Exception as exc:
