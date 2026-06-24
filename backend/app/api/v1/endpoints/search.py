@@ -21,17 +21,19 @@ def list_spaces(user: UserData = Depends(get_current_user)):
 def search(
     q: str = Query(..., min_length=1),
     top_k: int = Query(10, ge=1, le=50),
+    year: int | None = Query(None, ge=1800, le=2100),
     space: str = Query(..., min_length=1, description="Contexto: supreme_court|my_uploads|<other>"),
     background_tasks: BackgroundTasks = None,
     user: UserData = Depends(get_current_user),
 ):
-    print(f"Received search query: '{q}' in space '{space}' with top_k={top_k}", flush=True)
+    year_filter = year if isinstance(year, int) else None
+    print(f"Received search query: '{q}' in space '{space}' with top_k={top_k} and year={year_filter}", flush=True)
     if space not in get_accessible_spaces(user):
         raise HTTPException(403, detail="Space not accessible")
     try:
         if not search_engine.has_space(space):
             raise HTTPException(400, detail=f"Unknown space '{space}'")
-        hits = search_engine.search(q, top_k, space)
+        hits = search_engine.search(q, top_k, space, year_filter)
         doc_ids = [str(hit.get("id")) for hit in hits if hit.get("id")]
         metadata_rows = case_metadata.get_metadata_rows(space, doc_ids)
         metadata_store_available = metadata_rows is not None

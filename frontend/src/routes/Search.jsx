@@ -18,6 +18,7 @@ export default function Search() {
   const [_spaces, setSpaces] = useState([]);
   const [space, setSpace]   = useState("");
   const [topK, setTopK] = useState("10");
+  const [year, setYear] = useState("");
   const [results, setResults] = useState([]);
   const [searched, setSearched] = useState(false);
   useEffect(() => {
@@ -37,10 +38,13 @@ export default function Search() {
     setLoading(true);
     setSearched(true);
     try {
-      const res = await apiFetch(
-        "search",
-        `?q=${encodeURIComponent(q)}&space=${encodeURIComponent(space)}&top_k=${topK}`
-      );
+      const params = new URLSearchParams({
+        q,
+        space,
+        top_k: topK,
+      });
+      if (year.trim()) params.set("year", year.trim());
+      const res = await apiFetch("search", `?${params.toString()}`);
       setResults(res.results || []);
     } catch (err) {
       console.error("Search error:", err);
@@ -75,6 +79,20 @@ export default function Search() {
           onChange={(e) => setQ(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && onSearch()}
         />
+        <div className="flex items-center gap-2 text-sm text-gray-600">
+          <span>Año</span>
+          <Input
+            type="number"
+            inputMode="numeric"
+            min="1800"
+            max="2100"
+            className="h-11 w-24 rounded-xl bg-background px-3 text-sm shadow-sm focus-visible:border-gray-300 focus-visible:ring-0"
+            placeholder="Todos"
+            value={year}
+            onChange={(e) => setYear(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && onSearch()}
+          />
+        </div>
         <div className="flex items-center gap-2 text-sm text-gray-600">
           <span>Mostrar</span>
           <Select value={topK} onValueChange={setTopK}>

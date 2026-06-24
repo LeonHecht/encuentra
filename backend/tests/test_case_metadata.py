@@ -18,7 +18,7 @@ def test_search_attaches_ready_metadata(monkeypatch):
     monkeypatch.setattr(
         search_ep.search_engine,
         "search",
-        lambda q, top_k, space: [
+        lambda q, top_k, space, year=None: [
             {
                 "id": "539-2024",
                 "title": "539-2024",
@@ -56,7 +56,7 @@ def test_search_enqueues_missing_metadata(monkeypatch):
     monkeypatch.setattr(
         search_ep.search_engine,
         "search",
-        lambda q, top_k, space: [
+        lambda q, top_k, space, year=None: [
             {
                 "id": "A1",
                 "title": "A1",
@@ -139,7 +139,7 @@ def test_extract_metadata_with_openai_validates_structured_json(monkeypatch):
 
     class FakeResponses:
         def create(self, **kwargs):
-            assert kwargs["reasoning"] == {"effort": "minimal"}
+            assert kwargs["reasoning"] == {"effort": case_metadata.settings.CASE_METADATA_REASONING_EFFORT}
             assert kwargs["text"]["format"]["type"] == "json_schema"
             assert kwargs["text"]["format"]["strict"] is True
             return SimpleNamespace(output_text=json.dumps(payload))

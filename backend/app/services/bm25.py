@@ -60,7 +60,7 @@ class BM25Search:
                         content = f"{title} {text}".strip()
                         tokens_norm = [self.normalize_token(w) for w in content.split()]
 
-                        self.corpus[space].append({"id": doc_id, "title": title, "text": content})
+                        self.corpus[space].append({"id": doc_id, "title": title, "text": content, "case_year": obj.get("case_year")})
                         self.tokenized[space].append(tokens_norm)
             else:
                 raise Exception("corpus.jsonl file missing.")
@@ -98,7 +98,7 @@ class BM25Search:
                 return d
         return None
 
-    def search(self, query: str, top_k: int = 30, space: str = "supreme_court") -> list[dict]:
+    def search(self, query: str, top_k: int = 30, space: str = "supreme_court", year: int | None = None) -> list[dict]:
         """
         Perform BM25 search over the loaded corpus.
 
@@ -128,7 +128,10 @@ class BM25Search:
         print(f"Searching for query: {tokenized_query}")
         scores = model.get_scores(tokenized_query)
         top_indices = sorted(range(len(scores)), key=lambda i: scores[i], reverse=True)
-        top_indices = [i for i in top_indices if scores[i] > 0][:top_k]
+        top_indices = [
+            i for i in top_indices
+            if scores[i] > 0 and (year is None or self.corpus[space][i].get("case_year") == year)
+        ][:top_k]
         
         print(f"Found {len(top_indices)} relevant documents in space '{space}'.")
 
@@ -171,6 +174,7 @@ class BM25Search:
                 "id": doc["id"],
                 "title": title,
                 "score": float(scores[i]),
+                "case_year": doc.get("case_year"),
                 "snippet": snippet,
                 "download_url": file_url,
             })

@@ -34,7 +34,7 @@ test('renders grouped spaces with labels', () => {
   render(<SpaceSelect value={''} onChange={() => {}} allowCreate placeholder="Selecciona" />);
 
   // Group headers
-  expect(screen.getByText('Public')).toBeInTheDocument();
+  expect(screen.getByText('Público')).toBeInTheDocument();
   expect(screen.getByText('Personal')).toBeInTheDocument();
   expect(screen.getByText('Organisation')).toBeInTheDocument();
 
