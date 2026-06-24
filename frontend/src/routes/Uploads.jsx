@@ -1,10 +1,13 @@
 import { useState } from "react";
+import { useNavigate } from "react-router-dom";
 import SpaceSelect      from "@/components/SpaceSelect";
 import { apiFetch }       from "@/hooks/useApi";
+import { supabase }       from "@/lib/supabaseClient";
 import { createSpace }  from "@/api/createSpace";
 import IntegrationTabs  from "@/components/IntegrationTabs";
 
 export default function Uploads() {
+  const navigate = useNavigate();
   const [spacesVersion, bump] = useState(0);      // force SpaceSelect reload
   const [space,  setSpace]    = useState("");
   const [files,  setFiles]    = useState([]);
@@ -30,6 +33,13 @@ export default function Uploads() {
   /* ---------- upload handler ---------- */
   const onSubmit = async (e) => {
     e.preventDefault();
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+    if (!session) {
+      navigate("/signup");
+      return;
+    }
     if (!space || space === "__new__") {
       setMsg("Choose a space first.");
       return;

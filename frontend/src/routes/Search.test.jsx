@@ -1,8 +1,13 @@
-import { vi, it, expect } from 'vitest';
+import { vi, it, expect, beforeEach } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import React from 'react';
+import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import Search from './Search';
+
+const { getSessionMock } = vi.hoisted(() => ({
+  getSessionMock: vi.fn(),
+}));
 
 // Mock SpaceSelect to a lightweight placeholder that just renders current value
 vi.mock('@/components/SpaceSelect', () => ({
@@ -66,8 +71,25 @@ vi.mock('@/hooks/useApi', () => ({
   apiFetch: (...args) => apiMock(...args),
 }));
 
+vi.mock('@/lib/supabaseClient', () => ({
+  supabase: {
+    auth: {
+      getSession: getSessionMock,
+    },
+  },
+}));
+
+beforeEach(() => {
+  apiMock.mockClear();
+  getSessionMock.mockReset();
+  getSessionMock.mockResolvedValue({
+    data: { session: { access_token: 'test-token' } },
+    error: null,
+  });
+});
+
 it('loads spaces, performs search, and renders results', async () => {
-  render(<Search />);
+  render(<MemoryRouter><Search /></MemoryRouter>);
 
   // After mount, spaces should be loaded and first selected
   await waitFor(() => expect(screen.getByText('Space: public')).toBeInTheDocument());
@@ -93,7 +115,7 @@ it('loads spaces, performs search, and renders results', async () => {
 });
 
 it('expands and collapses legal metadata details', async () => {
-  render(<Search />);
+  render(<MemoryRouter><Search /></MemoryRouter>);
 
   await waitFor(() => expect(screen.getByText('Space: public')).toBeInTheDocument());
   await userEvent.type(screen.getByPlaceholderText(/Ingresa las palabras/i), 'libertad');
@@ -110,3 +132,23 @@ it('expands and collapses legal metadata details', async () => {
   expect(screen.queryByText('Resumen jurídico')).not.toBeInTheDocument();
 });
 
+it('redirects unauthenticated users to signup when searching', async () => {
+  getSessionMock.mockResolvedValueOnce({
+    data: { session: null },
+    error: null,
+  });
+
+  render(
+    <MemoryRouter initialEntries={['/search']}>
+      <Routes>
+        <Route path="/search" element={<Search />} />
+        <Route path="/signup" element={<div>Sign up page</div>} />
+      </Routes>
+    </MemoryRouter>
+  );
+
+  await userEvent.click(screen.getByRole('button', { name: 'Buscar' }));
+
+  expect(await screen.findByText('Sign up page')).toBeInTheDocument();
+  expect(apiMock).not.toHaveBeenCalledWith('search', expect.anything());
+});

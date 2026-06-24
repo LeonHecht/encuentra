@@ -1,5 +1,7 @@
 import { useState, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
 import { apiFetch } from "@/hooks/useApi";
+import { supabase } from "@/lib/supabaseClient";
 import SpaceSelect  from "@/components/SpaceSelect";
 import SearchResultCard from "@/components/SearchResultCard";
 import { Button } from "@/components/ui/button";
@@ -14,6 +16,7 @@ import {
 import { Search as SearchIcon } from "lucide-react";
 
 export default function Search() {
+  const navigate = useNavigate();
   const [q, setQ]           = useState("");
   const [_spaces, setSpaces] = useState([]);
   const [space, setSpace]   = useState("");
@@ -34,6 +37,13 @@ export default function Search() {
   const [toast, setToast] = useState({ docId: null, msg: "" });
 
   const onSearch = async () => {
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+    if (!session) {
+      navigate("/signup");
+      return;
+    }
     if (!q.trim()) return;
     setLoading(true);
     setSearched(true);
