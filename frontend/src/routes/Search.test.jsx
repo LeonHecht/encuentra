@@ -17,10 +17,47 @@ const apiMock = vi.fn(async (path) => {
   if (path === 'search') {
     return {
       results: [
-        { id: '1', title: 'Case One', snippet: 'alpha beta gamma', score: 0.987, download_url: '' },
-        { id: '2', title: 'Case Two', snippet: 'delta epsilon', score: 0.765, download_url: '' },
+        {
+          id: '1',
+          title: 'Case One',
+          case_year: 2025,
+          snippet: 'alpha beta gamma',
+          score: 0.987,
+          download_url: 'https://example.com/case.pdf',
+          metadata_status: 'ready',
+          metadata: {
+            generated_title: 'Hábeas corpus sobre libertad personal',
+            court_chamber: 'Sala de lo Constitucional',
+            resolution_type: 'Hábeas corpus',
+            outcome: 'Petición declarada improcedente',
+            legal_area_tags: ['Improcedencia', 'Libertad personal'],
+            parties: {
+              actors: ['Abogada solicitante'],
+              favored_parties: ['NAAR'],
+              defendants_or_authorities: ['Juez demandado'],
+              other_relevant_parties: [],
+            },
+            key_legal_provisions: [{ law: 'Constitución', article: 'Art. 13', text_reference: null }],
+            legal_issue_summary: 'La Sala rechazó la petición por tratarse de mera legalidad.',
+            relevant_dates: [{ label: 'Resolución de improcedencia', date_text: '08/01/2025', iso_date: '2025-01-08' }],
+            legal_questions: ['Limites del habeas corpus frente a valoracion probatoria'],
+            confidence: { overall: 0.9, notes: null },
+          },
+        },
+        {
+          id: '2',
+          title: 'Case Two',
+          snippet: 'delta epsilon',
+          score: 0.765,
+          download_url: '',
+          metadata_status: 'pending',
+          metadata: null,
+        },
       ],
     };
+  }
+  if (path === 'case-metadata') {
+    return { status: 'pending', metadata: null };
   }
   return {};
 });
@@ -42,11 +79,34 @@ it('loads spaces, performs search, and renders results', async () => {
   await userEvent.click(button);
 
   // Results render
-  await screen.findByText('Case One');
+  await screen.findByText('Hábeas corpus sobre libertad personal');
   expect(screen.getByText('Case Two')).toBeInTheDocument();
+  expect(screen.getByText('Sala de lo Constitucional')).toBeInTheDocument();
+  expect(screen.getByText('Petición declarada improcedente')).toBeInTheDocument();
+  expect(screen.getByRole('link', { name: /Descargar PDF/i })).toBeInTheDocument();
+  expect(screen.queryByText(/Copiar cita/i)).not.toBeInTheDocument();
+  expect(screen.queryByText(/Temas relacionados/i)).not.toBeInTheDocument();
 
   // Ensure useApi called for spaces and search
   expect(apiMock).toHaveBeenCalledWith('user/spaces');
   expect(apiMock).toHaveBeenCalledWith('search', expect.stringMatching(/\?q=contrato/));
+});
+
+it('expands and collapses legal metadata details', async () => {
+  render(<Search />);
+
+  await waitFor(() => expect(screen.getByText('Space: public')).toBeInTheDocument());
+  await userEvent.type(screen.getByPlaceholderText(/Ingresa las palabras/i), 'libertad');
+  await userEvent.click(screen.getByRole('button', { name: 'Buscar' }));
+
+  const expand = (await screen.findAllByRole('button', { name: /Expandir información/i }))[0];
+  await userEvent.click(expand);
+
+  expect(screen.getByText('Resumen jurídico')).toBeInTheDocument();
+  expect(screen.getByText('Fechas relevantes')).toBeInTheDocument();
+  expect(screen.getByText('Cuestiones jurídicas')).toBeInTheDocument();
+
+  await userEvent.click(screen.getByRole('button', { name: /Ocultar información/i }));
+  expect(screen.queryByText('Resumen jurídico')).not.toBeInTheDocument();
 });
 

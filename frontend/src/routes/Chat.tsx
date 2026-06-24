@@ -494,7 +494,7 @@ export default function Chat() {
             <SpaceSelect
               value={space}
               onChange={(v) => setSpace(v)}
-              className="ml-1"
+              className="ml-1 h-11 w-80 rounded-xl"
             />
           </div>
 

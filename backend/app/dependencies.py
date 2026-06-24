@@ -27,9 +27,20 @@ def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(securit
                 detail="Invalid token: missing user_id or email",
             )
         
-        # Get or create user in database
-        user = get_or_create_user_from_supabase(user_id, email, user_metadata)
-        return user
+        # Get or create user in database. If Supabase has a transient connection
+        # failure, keep authenticated public-space requests working from the
+        # verified JWT. Private spaces still require get_accessible_spaces to
+        # reach Supabase.
+        try:
+            return get_or_create_user_from_supabase(user_id, email, user_metadata)
+        except Exception as e:
+            print(f"User profile lookup failed; using JWT-only user context: {e}")
+            return UserData(
+                user_id=user_id,
+                username=email,
+                first_name=user_metadata.get("first_name", "") if user_metadata else "",
+                last_name=user_metadata.get("last_name", "") if user_metadata else "",
+            )
         
     except HTTPException:
         raise

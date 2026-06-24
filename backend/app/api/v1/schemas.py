@@ -1,5 +1,5 @@
 from pydantic import BaseModel, Field
-from typing import List
+from typing import List, Literal
 
 
 class SearchRequest(BaseModel):
@@ -17,6 +17,17 @@ class SearchResult(BaseModel):
     case_year: int | None = None
     snippet: str | None = None
     download_url: str | None = None
+    metadata_status: Literal["missing", "pending", "ready", "failed"] = "missing"
+    metadata: dict | None = None
+
+
+class CaseMetadataResponse(BaseModel):
+    """Cached enrichment metadata for a case."""
+    space: str
+    doc_id: str
+    status: Literal["missing", "pending", "ready", "failed"]
+    metadata: dict | None = None
+    error: str | None = None
 
 
 class SearchResponse(BaseModel):
