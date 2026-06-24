@@ -139,6 +139,7 @@ def test_extract_metadata_with_openai_validates_structured_json(monkeypatch):
 
     class FakeResponses:
         def create(self, **kwargs):
+            assert kwargs["reasoning"] == {"effort": "minimal"}
             assert kwargs["text"]["format"]["type"] == "json_schema"
             assert kwargs["text"]["format"]["strict"] is True
             return SimpleNamespace(output_text=json.dumps(payload))

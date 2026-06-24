@@ -359,6 +359,7 @@ def extract_metadata_with_openai(
 
     response = client.responses.create(
         model=settings.CASE_METADATA_MODEL,
+        reasoning={"effort": settings.CASE_METADATA_REASONING_EFFORT},
         instructions=SYSTEM_PROMPT,
         input=_build_user_prompt(
             query=query,
