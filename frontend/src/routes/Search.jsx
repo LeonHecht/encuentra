@@ -4,12 +4,20 @@ import SpaceSelect  from "@/components/SpaceSelect";
 import SearchResultCard from "@/components/SearchResultCard";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Search as SearchIcon } from "lucide-react";
 
 export default function Search() {
   const [q, setQ]           = useState("");
   const [_spaces, setSpaces] = useState([]);
   const [space, setSpace]   = useState("");
+  const [topK, setTopK] = useState("10");
   const [results, setResults] = useState([]);
   const [searched, setSearched] = useState(false);
   useEffect(() => {
@@ -31,7 +39,7 @@ export default function Search() {
     try {
       const res = await apiFetch(
         "search",
-        `?q=${encodeURIComponent(q)}&space=${space}`
+        `?q=${encodeURIComponent(q)}&space=${encodeURIComponent(space)}&top_k=${topK}`
       );
       setResults(res.results || []);
     } catch (err) {
@@ -67,6 +75,19 @@ export default function Search() {
           onChange={(e) => setQ(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && onSearch()}
         />
+        <div className="flex items-center gap-2 text-sm text-gray-600">
+          <span>Mostrar</span>
+          <Select value={topK} onValueChange={setTopK}>
+            <SelectTrigger className="h-11 w-24 rounded-xl">
+              <SelectValue aria-label={`${topK} resultados`} />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="10">10</SelectItem>
+              <SelectItem value="20">20</SelectItem>
+              <SelectItem value="50">50</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
         <Button
           type="button"
           onClick={onSearch}
