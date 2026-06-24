@@ -63,7 +63,8 @@ describe('<Search />', () => {
     await userEvent.type(input, 'derecho')
     await userEvent.click(btn)
     await screen.findByText(/Sentencia 123\/2020/)
-    expect(screen.getByText(/Score:/)).toBeInTheDocument()
+    expect(screen.getByText(/derecho constitucional/)).toBeInTheDocument()
+    expect(screen.queryByText(/Score:/)).not.toBeInTheDocument()
   })
 
   it('shows empty state when query has zero hits', async () => {
