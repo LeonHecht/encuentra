@@ -41,7 +41,7 @@ function LoadingLine({ width = "w-48" }) {
   return (
     <span
       aria-label="Cargando informacion juridica"
-      className={`inline-block h-3.5 ${width} animate-[pulse_1s_cubic-bezier(0.4,0,0.6,1)_infinite] rounded bg-gray-200 align-middle`}
+      className={`inline-block h-3.5 max-w-full ${width} animate-[pulse_1s_cubic-bezier(0.4,0,0.6,1)_infinite] rounded bg-gray-200 align-middle`}
     />
   );
 }
@@ -58,7 +58,7 @@ function provisionLabel(item) {
 
 function InfoRow({ icon: Icon, label, children }) {
   return (
-    <div className="grid grid-cols-[180px_1fr] gap-4 border-t border-gray-200 py-4">
+    <div className="grid gap-3 border-t border-gray-200 py-4 sm:grid-cols-[180px_1fr] sm:gap-4">
       <div className="flex items-start gap-3 text-gray-800">
         <Icon className="mt-0.5 h-5 w-5 text-gray-500" aria-hidden="true" />
         <span className="text-sm font-semibold">{label}</span>
@@ -135,8 +135,8 @@ export default function SearchResultCard({ result, space, feedback, onFeedback }
   const legalQuestions = asList(metadata?.legal_questions);
 
   return (
-    <article className="rounded-lg border border-gray-200 bg-white p-5 shadow-sm transition hover:shadow-md">
-      <div className="flex items-start justify-between gap-6">
+    <article className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm transition hover:shadow-md sm:p-5">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-6">
         <div className="min-w-0">
           <h3 className="text-lg font-semibold leading-6 text-gray-950">{title}</h3>
           <p className="mt-1 text-sm text-gray-600">
@@ -156,13 +156,13 @@ export default function SearchResultCard({ result, space, feedback, onFeedback }
             )}
           </div>
         </div>
-        <div className="shrink-0 text-right font-mono text-sm text-gray-500">
+        <div className="max-w-full break-all font-mono text-xs text-gray-500 sm:shrink-0 sm:text-right sm:text-sm">
           {result.case_year && <div>Año: {result.case_year}</div>}
           <div>ID: {result.id}</div>
         </div>
       </div>
 
-      <div className="mt-5 grid gap-4 lg:grid-cols-[1fr_320px]">
+      <div className="mt-5 grid gap-4 xl:grid-cols-[1fr_320px]">
         <div className="space-y-2 text-sm leading-6 text-gray-700">
           <p>
             <span className="font-semibold text-gray-900">Resultado:</span>{" "}
@@ -196,13 +196,13 @@ export default function SearchResultCard({ result, space, feedback, onFeedback }
         )}
       </div>
 
-      <div className="relative mt-4 flex items-center gap-2">
+      <div className="relative mt-4 flex flex-wrap items-center gap-2">
         {result.download_url && (
           <a
             href={new URL(result.download_url, API_BASE).toString()}
             target="_blank"
             rel="noreferrer"
-            className="inline-flex items-center gap-2 rounded-md bg-gray-200 px-4 py-2 text-sm text-gray-950 transition hover:bg-gray-100"
+            className="inline-flex min-h-10 items-center gap-2 rounded-md bg-gray-200 px-4 py-2 text-sm text-gray-950 transition hover:bg-gray-100"
           >
             <Download className="h-4 w-4" aria-hidden="true" />
             Descargar PDF
@@ -236,7 +236,7 @@ export default function SearchResultCard({ result, space, feedback, onFeedback }
         type="button"
         onClick={() => setExpanded((value) => !value)}
         aria-expanded={expanded}
-        className="mt-5 flex w-full items-center justify-between rounded-md border border-gray-200 bg-gray-50 px-4 py-2.5 text-sm font-medium text-gray-800 transition hover:bg-gray-100"
+        className="mt-5 flex w-full items-center justify-between gap-3 rounded-md border border-gray-200 bg-gray-50 px-4 py-2.5 text-left text-sm font-medium text-gray-800 transition hover:bg-gray-100"
       >
         {expanded ? "Ocultar información" : "Expandir información"}
         {expanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
