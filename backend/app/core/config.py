@@ -44,6 +44,7 @@ class Settings(BaseSettings):
     MAX_DOCS: int = 3
     CASE_METADATA_AUTO_ENRICH: bool = True
     CASE_METADATA_MODEL: str = "gpt-5-nano"
+    CASE_METADATA_REASONING_EFFORT: str = "none"  # none | low | medium | high | xhigh
     CASE_METADATA_MAX_RETRIES: int = 2
     CASE_METADATA_PENDING_RETRY_MINUTES: int = 10
 

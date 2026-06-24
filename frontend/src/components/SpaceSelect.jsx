@@ -45,7 +45,7 @@ export default function SpaceSelect({
       <SelectContent>
         {groups.public.length > 0 && (
           <SelectGroup>
-            <SelectLabel>Public</SelectLabel>
+            <SelectLabel>Público</SelectLabel>
             {groups.public.map((s) => (
               <SelectItem key={s} value={s}>
                 {label(s)}

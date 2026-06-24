@@ -21,29 +21,33 @@ def list_spaces(user: UserData = Depends(get_current_user)):
 def search(
     q: str = Query(..., min_length=1),
     top_k: int = Query(10, ge=1, le=50),
+    year: int | None = Query(None, ge=1800, le=2100),
     space: str = Query(..., min_length=1, description="Contexto: supreme_court|my_uploads|<other>"),
     background_tasks: BackgroundTasks = None,
     user: UserData = Depends(get_current_user),
 ):
-    print(f"Received search query: '{q}' in space '{space}' with top_k={top_k}", flush=True)
+    year_filter = year if isinstance(year, int) else None
+    print(f"Received search query: '{q}' in space '{space}' with top_k={top_k} and year={year_filter}", flush=True)
     if space not in get_accessible_spaces(user):
         raise HTTPException(403, detail="Space not accessible")
     try:
         if not search_engine.has_space(space):
             raise HTTPException(400, detail=f"Unknown space '{space}'")
-        hits = search_engine.search(q, top_k, space)
+        hits = search_engine.search(q, top_k, space, year_filter)
         doc_ids = [str(hit.get("id")) for hit in hits if hit.get("id")]
         metadata_rows = case_metadata.get_metadata_rows(space, doc_ids)
+        metadata_store_available = metadata_rows is not None
+        metadata_rows = metadata_rows or {}
         scheduled = 0
         enrichment_limit = len(hits)
         for hit in hits:
             doc_id = str(hit.get("id") or "")
             row = metadata_rows.get(doc_id)
-            status = case_metadata.normalize_status(row)
+            status = case_metadata.normalize_status(row) if metadata_store_available else "pending"
             hit["metadata_status"] = status
             hit["metadata"] = row.get("metadata") if row and status == "ready" else None
 
-            if settings.CASE_METADATA_AUTO_ENRICH and scheduled < enrichment_limit and status in ("missing", "pending", "failed"):
+            if metadata_store_available and settings.CASE_METADATA_AUTO_ENRICH and scheduled < enrichment_limit and status in ("missing", "pending", "failed"):
                 try:
                     should_enqueue = case_metadata.upsert_pending(space, doc_id, row)
                 except Exception as exc:
@@ -75,11 +79,28 @@ def search(
 def get_case_metadata(
     space: str,
     doc_id: str,
+    background_tasks: BackgroundTasks = None,
     user: UserData = Depends(get_current_user),
 ):
     if space not in get_accessible_spaces(user):
         raise HTTPException(403, detail="Space not accessible")
-    row = case_metadata.get_metadata_row(space, doc_id)
+    try:
+        row = case_metadata.get_metadata_row(space, doc_id)
+    except case_metadata.MetadataStoreUnavailable:
+        return CaseMetadataResponse(**case_metadata.row_to_response(space, doc_id, {"status": "pending"}))
+    status = case_metadata.normalize_status(row)
+
+    if settings.CASE_METADATA_AUTO_ENRICH and status in ("missing", "pending", "failed"):
+        try:
+            should_enqueue = case_metadata.upsert_pending(space, doc_id, row)
+        except Exception as exc:
+            print(f"[case_metadata] Failed to retry enqueue {space}/{doc_id}: {exc}", flush=True)
+            should_enqueue = False
+        if should_enqueue:
+            row = {"space": space, "doc_id": doc_id, "status": "pending"}
+            if background_tasks is not None:
+                background_tasks.add_task(case_metadata.enrich_case_metadata, space, doc_id)
+
     return CaseMetadataResponse(**case_metadata.row_to_response(space, doc_id, row))
 
 
@@ -87,9 +108,10 @@ def get_case_metadata(
 def get_case_metadata_by_query(
     space: str = Query(..., min_length=1),
     doc_id: str = Query(..., min_length=1),
+    background_tasks: BackgroundTasks = None,
     user: UserData = Depends(get_current_user),
 ):
-    return get_case_metadata(space=space, doc_id=doc_id, user=user)
+    return get_case_metadata(space=space, doc_id=doc_id, background_tasks=background_tasks, user=user)
 
 # @router.post("/search", response_model=SearchResponse, summary="Run a BM25 or transformer search")
 # def search(request: Request, req: SearchRequest = Body(..., description="Your search parameters")) -> SearchResponse:

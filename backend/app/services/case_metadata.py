@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import time
 from datetime import datetime, timedelta, timezone
 from typing import Any, Literal
 
@@ -14,6 +15,10 @@ from backend.app.services.search import search_engine
 
 
 MetadataStatus = Literal["missing", "pending", "ready", "failed"]
+
+
+class MetadataStoreUnavailable(RuntimeError):
+    pass
 
 
 class CaseParties(BaseModel):
@@ -196,18 +201,22 @@ def source_hash(space: str, doc_id: str, text: str) -> str:
 
 
 def get_metadata_row(space: str, doc_id: str) -> dict[str, Any] | None:
-    resp = (
-        get_supabase()
-        .table("case_metadata")
-        .select("*")
-        .eq("space", space)
-        .eq("doc_id", doc_id)
-        .execute()
-    )
+    try:
+        resp = (
+            get_supabase()
+            .table("case_metadata")
+            .select("*")
+            .eq("space", space)
+            .eq("doc_id", doc_id)
+            .execute()
+        )
+    except Exception as exc:
+        print(f"[case_metadata] Failed to fetch metadata row {space}/{doc_id}: {exc}", flush=True)
+        raise MetadataStoreUnavailable(str(exc)) from exc
     return resp.data[0] if resp.data else None
 
 
-def get_metadata_rows(space: str, doc_ids: list[str]) -> dict[str, dict[str, Any]]:
+def get_metadata_rows(space: str, doc_ids: list[str]) -> dict[str, dict[str, Any]] | None:
     if not doc_ids:
         return {}
     try:
@@ -221,7 +230,7 @@ def get_metadata_rows(space: str, doc_ids: list[str]) -> dict[str, dict[str, Any
         )
     except Exception as exc:
         print(f"[case_metadata] Failed to fetch metadata rows: {exc}", flush=True)
-        return {}
+        return None
     return {row["doc_id"]: row for row in (resp.data or [])}
 
 
@@ -243,6 +252,19 @@ def row_to_response(space: str, doc_id: str, row: dict[str, Any] | None) -> dict
         "metadata": row.get("metadata") if row and status == "ready" else None,
         "error": row.get("error") if row and status == "failed" else None,
     }
+
+
+def save_metadata_payload(payload: dict[str, Any], retries: int = 3) -> bool:
+    doc_ref = f"{payload.get('space')}/{payload.get('doc_id')}"
+    for attempt in range(1, retries + 1):
+        try:
+            get_supabase().table("case_metadata").upsert(payload, on_conflict="space,doc_id").execute()
+            return True
+        except Exception as exc:
+            print(f"[case_metadata] Failed to save metadata row {doc_ref} (attempt {attempt}/{retries}): {exc}", flush=True)
+            if attempt < retries:
+                time.sleep(0.5 * attempt)
+    return False
 
 
 def should_retry_pending(row: dict[str, Any] | None) -> bool:
@@ -278,8 +300,7 @@ def upsert_pending(space: str, doc_id: str, row: dict[str, Any] | None = None) -
         "attempt_count": attempts,
         "updated_at": _utcnow_iso(),
     }
-    get_supabase().table("case_metadata").upsert(payload, on_conflict="space,doc_id").execute()
-    return True
+    return save_metadata_payload(payload)
 
 
 def _get_openai_client() -> OpenAI | None:
@@ -338,6 +359,7 @@ def extract_metadata_with_openai(
 
     response = client.responses.create(
         model=settings.CASE_METADATA_MODEL,
+        reasoning={"effort": settings.CASE_METADATA_REASONING_EFFORT},
         instructions=SYSTEM_PROMPT,
         input=_build_user_prompt(
             query=query,
@@ -361,7 +383,11 @@ def extract_metadata_with_openai(
 
 
 def enrich_case_metadata(space: str, doc_id: str, query: str = "", matched_snippet: str | None = None) -> None:
-    row = get_metadata_row(space, doc_id)
+    print(f"[case_metadata] Starting enrichment for {space}/{doc_id}", flush=True)
+    try:
+        row = get_metadata_row(space, doc_id)
+    except MetadataStoreUnavailable:
+        row = None
     attempts = int(row.get("attempt_count") or 0) if row else 0
     try:
         doc = search_engine.get_document_by_id(space, doc_id)
@@ -399,4 +425,6 @@ def enrich_case_metadata(space: str, doc_id: str, query: str = "", matched_snipp
         }
         print(f"[case_metadata] Enrichment failed for {space}/{doc_id}: {exc}", flush=True)
 
-    get_supabase().table("case_metadata").upsert(payload, on_conflict="space,doc_id").execute()
+    saved = save_metadata_payload(payload)
+    if saved and payload["status"] == "ready":
+        print(f"[case_metadata] Finished enrichment for {space}/{doc_id}", flush=True)

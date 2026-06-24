@@ -18,7 +18,7 @@ def test_search_attaches_ready_metadata(monkeypatch):
     monkeypatch.setattr(
         search_ep.search_engine,
         "search",
-        lambda q, top_k, space: [
+        lambda q, top_k, space, year=None: [
             {
                 "id": "539-2024",
                 "title": "539-2024",
@@ -56,7 +56,7 @@ def test_search_enqueues_missing_metadata(monkeypatch):
     monkeypatch.setattr(
         search_ep.search_engine,
         "search",
-        lambda q, top_k, space: [
+        lambda q, top_k, space, year=None: [
             {
                 "id": "A1",
                 "title": "A1",
@@ -102,6 +102,21 @@ def test_metadata_endpoint_rejects_inaccessible_space(monkeypatch):
     assert exc.value.status_code == 403
 
 
+def test_metadata_endpoint_handles_metadata_read_failure(monkeypatch):
+    monkeypatch.setattr(search_ep, "get_accessible_spaces", lambda user: ["supreme_court"])
+
+    def fail_read(space, doc_id):
+        raise case_metadata.MetadataStoreUnavailable("Server disconnected")
+
+    monkeypatch.setattr(search_ep.case_metadata, "get_metadata_row", fail_read)
+    monkeypatch.setattr(search_ep.settings, "CASE_METADATA_AUTO_ENRICH", True)
+
+    response = search_ep.get_case_metadata(space="supreme_court", doc_id="A1", user=_user())
+
+    assert response.status == "pending"
+
+
+
 def test_extract_metadata_with_openai_validates_structured_json(monkeypatch):
     payload = {
         "generated_title": "Habeas corpus sobre detencion provisional",
@@ -124,6 +139,7 @@ def test_extract_metadata_with_openai_validates_structured_json(monkeypatch):
 
     class FakeResponses:
         def create(self, **kwargs):
+            assert kwargs["reasoning"] == {"effort": case_metadata.settings.CASE_METADATA_REASONING_EFFORT}
             assert kwargs["text"]["format"]["type"] == "json_schema"
             assert kwargs["text"]["format"]["strict"] is True
             return SimpleNamespace(output_text=json.dumps(payload))

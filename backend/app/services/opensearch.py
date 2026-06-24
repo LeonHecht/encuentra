@@ -788,7 +788,7 @@ class OpenSearchSearch:
         except Exception:
             return False
 
-    def search(self, query: str, top_k: int = 30, space: str = "supreme_court") -> list[dict[str, Any]]:
+    def search(self, query: str, top_k: int = 30, space: str = "supreme_court", year: int | None = None) -> list[dict[str, Any]]:
         client = self._get_client()
         alias = self._alias_name(space)
         target_index = alias
@@ -797,18 +797,40 @@ class OpenSearchSearch:
                 print(f"[OpenSearch] Alias/index '{alias}' missing for space '{space}'.")
                 return []
 
+        search_query = {
+            "multi_match": {
+                "query": query,
+                "fields": ["title^2", "text"],
+                "type": "best_fields",
+            }
+        }
+        if year is not None:
+            year_text = str(year)
+            year_filter = {
+                "bool": {
+                    "should": [
+                        {"term": {"case_year": year}},
+                        {"prefix": {"s3_file_key": f"pdfs/data/{year_text}/"}},
+                        {"prefix": {"s3_text_key": f"pdfs/text/{year_text}/"}},
+                        {"wildcard": {"s3_file_key": f"*/{year_text}/*"}},
+                        {"wildcard": {"s3_text_key": f"*/{year_text}/*"}},
+                    ],
+                    "minimum_should_match": 1,
+                }
+            }
+            search_query = {
+                "bool": {
+                    "must": [search_query],
+                    "filter": [year_filter],
+                }
+            }
+
         body = {
             "size": top_k,
             "timeout": f"{settings.OPENSEARCH_SEARCH_TIMEOUT}s",
             "track_total_hits": False,
             "_source": {"includes": ["id", "title", "case_year", "download_url", "s3_file_key"]},
-            "query": {
-                "multi_match": {
-                    "query": query,
-                    "fields": ["title^2", "text"],
-                    "type": "best_fields",
-                }
-            },
+            "query": search_query,
         }
 
         if settings.OPENSEARCH_ENABLE_HIGHLIGHTS:
