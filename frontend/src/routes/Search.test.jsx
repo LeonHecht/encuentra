@@ -105,7 +105,7 @@ it('loads spaces, performs search, and renders results', async () => {
   expect(screen.getByText('Case Two')).toBeInTheDocument();
   expect(screen.getByText('Sala de lo Constitucional')).toBeInTheDocument();
   expect(screen.getByText('Petición declarada improcedente')).toBeInTheDocument();
-  expect(screen.getByRole('link', { name: /Descargar PDF/i })).toBeInTheDocument();
+  expect(screen.getByRole('link', { name: /Abrir PDF/i })).toBeInTheDocument();
   expect(screen.queryByText(/Copiar cita/i)).not.toBeInTheDocument();
   expect(screen.queryByText(/Temas relacionados/i)).not.toBeInTheDocument();
 
