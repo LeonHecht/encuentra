@@ -3,10 +3,10 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState } 
 const STORAGE_KEY = "encuentra.chatContextDocuments";
 const fallbackContext = {
   documents: [],
-  addDocument: (_doc) => {},
-  removeDocument: (_space, _id) => {},
+  addDocument: () => {},
+  removeDocument: () => {},
   clearDocuments: () => {},
-  isSelected: (_space, _id) => false,
+  isSelected: () => false,
 };
 const ChatContextDocumentsContext = createContext(fallbackContext);
 
@@ -84,6 +84,7 @@ export function ChatContextDocumentsProvider({ children }) {
   );
 }
 
+// eslint-disable-next-line react-refresh/only-export-components
 export function useChatContextDocuments() {
   return useContext(ChatContextDocumentsContext);
 }
