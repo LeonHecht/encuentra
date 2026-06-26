@@ -3,10 +3,13 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState } 
 const STORAGE_KEY = "encuentra.chatContextDocuments";
 const fallbackContext = {
   documents: [],
-  addDocument: () => {},
-  removeDocument: () => {},
+  addDocument: (...args) => { void args; },
+  removeDocument: (...args) => { void args; },
   clearDocuments: () => {},
-  isSelected: () => false,
+  isSelected: (...args) => {
+    void args;
+    return false;
+  },
 };
 const ChatContextDocumentsContext = createContext(fallbackContext);
 
