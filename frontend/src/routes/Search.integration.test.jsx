@@ -1,8 +1,13 @@
-import { vi, it, expect, describe } from 'vitest'
+import { vi, it, expect, describe, beforeEach } from 'vitest'
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import React from 'react'
+import { MemoryRouter } from 'react-router-dom'
 import Search from './Search'
+
+const { getSessionMock } = vi.hoisted(() => ({
+  getSessionMock: vi.fn(),
+}))
 
 // Mock SpaceSelect to a simple <select>
 vi.mock('@/components/SpaceSelect', () => ({
@@ -37,9 +42,32 @@ vi.mock('@/hooks/useApi', () => ({
   apiFetch: (...args) => apiMock(...args),
 }))
 
+vi.mock('@/lib/supabaseClient', () => ({
+  supabase: {
+    auth: {
+      getSession: getSessionMock,
+    },
+  },
+}))
+
+const renderSearch = () => render(
+  <MemoryRouter>
+    <Search />
+  </MemoryRouter>
+)
+
 describe('<Search />', () => {
+  beforeEach(() => {
+    apiMock.mockClear()
+    getSessionMock.mockReset()
+    getSessionMock.mockResolvedValue({
+      data: { session: { access_token: 'test-token' } },
+      error: null,
+    })
+  })
+
   it('ignores blank queries (no search, no empty-state)', async () => {
-    render(<Search />)
+    renderSearch()
 
     // waits for spaces load + heading
     await waitFor(() => expect(screen.getByText(/Buscar casos/i)).toBeInTheDocument())
@@ -54,7 +82,7 @@ describe('<Search />', () => {
   })
 
   it('runs a real search and renders a result', async () => {
-    render(<Search />)
+    renderSearch()
     await screen.findByText(/Buscar casos/)
 
     const input = screen.getByPlaceholderText(/Ingresa las palabras/i)
@@ -68,7 +96,7 @@ describe('<Search />', () => {
   })
 
   it('shows empty state when query has zero hits', async () => {
-    render(<Search />)
+    renderSearch()
     await screen.findByText(/Buscar casos/)
 
     const input = screen.getByPlaceholderText(/Ingresa las palabras/i)
@@ -80,4 +108,3 @@ describe('<Search />', () => {
     await screen.findByText(/No se encontraron resultados\./)
   })
 })
-
