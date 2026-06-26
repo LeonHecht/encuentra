@@ -49,6 +49,8 @@ type ChatMsg = {
   citations?: Array<{ doc_id: string; snippet?: string }>;
   reasoning?: string[];
   reasoningStreaming?: boolean;
+  reasoningStartedAt?: number;
+  reasoningEndedAt?: number;
 };
 
 export default function Chat() {
@@ -157,6 +159,8 @@ export default function Chat() {
           citations: m.meta?.citations || [],
           reasoning: m.meta?.reasoning || [],
           reasoningStreaming: false,
+          reasoningStartedAt: undefined,
+          reasoningEndedAt: undefined,
         }))
       );
     }
@@ -215,7 +219,14 @@ export default function Chat() {
     const id = `${Date.now()}-assistant`;
     setMessages((prev) => [
       ...prev,
-      { id, role: "assistant", text: "", reasoning: [], reasoningStreaming: true },
+      {
+        id,
+        role: "assistant",
+        text: "",
+        reasoning: [],
+        reasoningStreaming: true,
+        reasoningStartedAt: Date.now(),
+      },
     ]);
     return id;
   }
@@ -228,6 +239,25 @@ export default function Chat() {
     );
   }
 
+  const sleep = (ms: number) => new Promise((resolve) => window.setTimeout(resolve, ms));
+
+  async function appendAssistantDeltaAnimated(assistantId: string, delta: string) {
+    if (!delta) return;
+
+    // If upstream/proxy buffering releases a large delta at once, keep the
+    // visible response streaming instead of painting a whole paragraph in one render.
+    if (delta.length <= 8) {
+      appendAssistantDelta(assistantId, delta);
+      await sleep(8);
+      return;
+    }
+
+    for (let i = 0; i < delta.length; i += 4) {
+      appendAssistantDelta(assistantId, delta.slice(i, i + 4));
+      await sleep(10);
+    }
+  }
+
   function finalizeAssistant(assistantId: string, fullText: string, citations?: ChatMsg["citations"]) {
     setMessages((prev) =>
         prev.map((m) =>
@@ -237,18 +267,38 @@ export default function Chat() {
   }
 
   function addReasoningLine(assistantId: string, line: string) {
+    const trimmed = line.trim();
+    if (!trimmed) return;
     setMessages((prev) =>
       prev.map((m) => {
         if (m.id !== assistantId) return m;
         const existing = m.reasoning || [];
-        if (existing.includes(line)) return m;
-        return { ...m, reasoning: [...existing, line], reasoningStreaming: true };
+        if (existing[existing.length - 1] === trimmed) return m;
+        return {
+          ...m,
+          reasoning: [...existing, trimmed],
+          reasoningStreaming: true,
+          reasoningStartedAt: m.reasoningStartedAt ?? Date.now(),
+          reasoningEndedAt: undefined,
+        };
       })
     );
   }
 
   function setMessageReasoningStreaming(assistantId: string, streaming: boolean) {
-    setMessages((prev) => prev.map((m) => (m.id === assistantId ? { ...m, reasoningStreaming: streaming } : m)));
+    const now = Date.now();
+    setMessages((prev) =>
+      prev.map((m) =>
+        m.id === assistantId
+          ? {
+              ...m,
+              reasoningStreaming: streaming,
+              reasoningStartedAt: m.reasoningStartedAt ?? now,
+              reasoningEndedAt: streaming ? undefined : m.reasoningEndedAt ?? now,
+            }
+          : m
+      )
+    );
   }
 
   function finishReasoningNow(assistantId: string) {
@@ -260,9 +310,17 @@ export default function Chat() {
         return {
           ...m,
           reasoningStreaming: false,
+          reasoningEndedAt: m.reasoningEndedAt ?? Date.now(),
         };
       })
     );
+  }
+
+  function getReasoningDuration(m: ChatMsg) {
+    const startedAt = m.reasoningStartedAt;
+    const endedAt = m.reasoningEndedAt;
+    if (!startedAt || !endedAt) return undefined;
+    return Math.max(1, Math.ceil((endedAt - startedAt) / 1000));
   }
 
     async function handleSubmitNonStream(trimmed: string) {
@@ -345,8 +403,11 @@ export default function Chat() {
     const reader = res.body.getReader();
     const decoder = new TextDecoder();
     let buffer = "";
+    let streamedAnswer = "";
+    let completedReceived = false;
 
     const handleFrame = async (event: string, dataStr: string) => {
+      if (dataStr === "[DONE]") return;
       let payload: any = {};
       try { payload = dataStr ? JSON.parse(dataStr) : {}; } catch {}
 
@@ -355,22 +416,28 @@ export default function Chat() {
           const msg = payload.msg || "Pensando";
           // Attach emitted reasoning message to the current assistant message
           addReasoningLine(assistantId, msg);
-          reasoningBuf.push(msg);
+          if (reasoningBuf[reasoningBuf.length - 1] !== msg) reasoningBuf.push(msg);
                   break;
         }
         case "response.output_text.delta": {
-            const delta = payload.delta || "";
-            appendAssistantDelta(assistantId, delta);
+            const delta = payload.delta ?? payload.text ?? payload.content ?? "";
+            streamedAnswer += delta;
             // As soon as the assistant starts typing, stop thinking and show duration immediately
             finishReasoningNow(assistantId);
+            await appendAssistantDeltaAnimated(assistantId, delta);
             break;
         }
         case "response.output_text.done": {
+            if (payload.text && payload.text !== streamedAnswer) {
+              streamedAnswer = payload.text;
+              finalizeAssistant(assistantId, streamedAnswer);
+            }
             // optional: nothing; we’ll finalize on response.completed
             break;
         }
         case "response.completed": {
-            const answer = payload.answer ?? "";
+            completedReceived = true;
+            const answer = payload.answer || streamedAnswer;
             const citations = payload.citations ?? [];
             const title = payload.title ?? "";
             const newState = payload.agent_state ?? null;
@@ -409,27 +476,39 @@ export default function Chat() {
         }
     };
 
+    const parseFrame = (frame: string) => {
+      let evt = "message";
+      let dataStr = "";
+
+      for (const line of frame.split(/\r?\n/)) {
+        if (line.startsWith("event:")) evt = line.slice(6).trim();
+        else if (line.startsWith("data:")) dataStr += line.slice(5).trim();
+      }
+
+      return { evt, dataStr };
+    };
+
     // basic SSE parsing: frames separated by \n\n, lines: "event: ..." and "data: ..."
     try {
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
         buffer += decoder.decode(value, { stream: true });
+        buffer = buffer.replace(/\r\n/g, "\n");
 
         let sepIdx;
         while ((sepIdx = buffer.indexOf("\n\n")) !== -1) {
           const frame = buffer.slice(0, sepIdx);
           buffer = buffer.slice(sepIdx + 2);
 
-          let evt: string | null = null;
-          let dataStr = "";
-
-          for (const line of frame.split("\n")) {
-            if (line.startsWith("event:")) evt = line.slice(6).trim();
-            else if (line.startsWith("data:")) dataStr += line.slice(5).trim();
-          }
+          const { evt, dataStr } = parseFrame(frame);
           if (evt) await handleFrame(evt, dataStr);
         }
+      }
+      const tail = buffer.trim();
+      if (tail) {
+        const { evt, dataStr } = parseFrame(tail);
+        if (evt) await handleFrame(evt, dataStr);
       }
     } catch (err: any) {
       if (err?.name === "AbortError") {
@@ -441,6 +520,9 @@ export default function Chat() {
       // safety: if stream ended (naturally or aborted) without response.completed, mark ready
       setStatus("ready");
       abortRef.current = null;
+      if (!completedReceived && streamedAnswer) {
+        finalizeAssistant(assistantId, streamedAnswer);
+      }
       // Ensure reasoning collapses if we didn't receive response.completed
       setMessageReasoningStreaming(assistantId, false);
     }
@@ -532,6 +614,8 @@ export default function Chat() {
                             <div className="mb-3">
                               <Reasoning
                                 isStreaming={!!m.reasoningStreaming}
+                                message={m.reasoning[m.reasoning.length - 1]}
+                                duration={getReasoningDuration(m)}
                                 defaultOpen={!!m.reasoningStreaming}
                               >
                                 <ReasoningTrigger />

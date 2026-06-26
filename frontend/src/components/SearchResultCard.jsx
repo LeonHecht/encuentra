@@ -3,7 +3,7 @@ import {
   Calendar,
   ChevronDown,
   ChevronUp,
-  Download,
+  ExternalLink,
   FileText,
   Scale,
   ThumbsDown,
@@ -204,8 +204,8 @@ export default function SearchResultCard({ result, space, feedback, onFeedback }
             rel="noreferrer"
             className="inline-flex min-h-10 items-center gap-2 rounded-md bg-gray-200 px-4 py-2 text-sm text-gray-950 transition hover:bg-gray-100"
           >
-            <Download className="h-4 w-4" aria-hidden="true" />
-            Descargar PDF
+            <ExternalLink className="h-4 w-4" aria-hidden="true" />
+            Abrir PDF
           </a>
         )}
         <div className="ml-auto flex gap-2">
@@ -213,9 +213,8 @@ export default function SearchResultCard({ result, space, feedback, onFeedback }
             onClick={() => onFeedback(result.id, true)}
             disabled={feedback != null}
             aria-label="Marcar resultado como útil"
-            className={`rounded-full p-1.5 transition ${
-              feedback === true ? "bg-green-200 text-green-800" : "text-gray-600 hover:bg-green-100"
-            }`}
+            className={`rounded-full p-1.5 transition ${feedback === true ? "bg-green-200 text-green-800" : "text-gray-600 hover:bg-green-100"
+              }`}
           >
             <ThumbsUp className="h-4 w-4" />
           </button>
@@ -223,9 +222,8 @@ export default function SearchResultCard({ result, space, feedback, onFeedback }
             onClick={() => onFeedback(result.id, false)}
             disabled={feedback != null}
             aria-label="Marcar resultado como no útil"
-            className={`rounded-full p-1.5 transition ${
-              feedback === false ? "bg-red-200 text-red-800" : "text-gray-600 hover:bg-red-100"
-            }`}
+            className={`rounded-full p-1.5 transition ${feedback === false ? "bg-red-200 text-red-800" : "text-gray-600 hover:bg-red-100"
+              }`}
           >
             <ThumbsDown className="h-4 w-4" />
           </button>
