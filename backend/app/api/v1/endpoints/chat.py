@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from fastapi.responses import StreamingResponse
 from typing import List, Dict, Any
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import Any
 import re
 import json
@@ -31,6 +31,7 @@ class AgentContext:
     space: str
     openai_messages: List[Dict[str, Any]] = field(default_factory=list)
     last_user_msg: str = ""
+    context_documents: List[Dict[str, Any]] = field(default_factory=list)
     title: Optional[str] = None
     citations: List[Dict[str, str]] = field(default_factory=list)
     trace: List[Dict[str, Any]] = field(default_factory=list)
@@ -39,10 +40,18 @@ class AgentContext:
     keep_reasoning: bool = True
 
 
+class ContextDocument(BaseModel):
+    space: str
+    id: str
+    title: str | None = None
+    case_year: int | None = None
+
+
 class AgenticChatRequest(BaseModel):
     space: str
     messages: list[dict[str, Any]]   # role/content pairs
     state: str | None = None
+    context_documents: list[ContextDocument] = Field(default_factory=list)
 
 
 router = APIRouter()
@@ -279,6 +288,45 @@ def fetch_document(id: str, space: str = "", max_tokens: int = 2048) -> Dict[str
         print("[fetch_document] Document has empty text:", id)
     return doc if doc is not None else {}
 
+def resolve_context_documents(req: AgenticChatRequest, max_documents: int = 10) -> list[dict[str, Any]]:
+    """Validate selected chat-context documents against the active search index."""
+    resolved: list[dict[str, Any]] = []
+    seen: set[tuple[str, str]] = set()
+    for selected in req.context_documents[:max_documents]:
+        doc_space = selected.space or req.space
+        doc_id = selected.id
+        if doc_space != req.space:
+            raise HTTPException(400, detail="Context documents must belong to the selected chat space")
+        key = (doc_space, doc_id)
+        if key in seen:
+            continue
+        doc = search_engine.get_document_by_id(space=doc_space, doc_id=doc_id)
+        if doc is None:
+            raise HTTPException(400, detail=f"Context document '{doc_id}' was not found in the search index")
+        seen.add(key)
+        resolved.append({
+            "space": doc_space,
+            "id": doc_id,
+            "title": selected.title or doc.get("title") or doc_id,
+            "case_year": selected.case_year or doc.get("case_year"),
+        })
+    return resolved
+
+def context_documents_message(context_documents: list[dict[str, Any]]) -> dict[str, str] | None:
+    if not context_documents:
+        return None
+    lines = [
+        "The user attached these indexed documents as chat context.",
+        "Prefer these documents when answering the next user request.",
+        "Before citing or relying on a document, call fetch_passages or fetch_document for its ID.",
+        "",
+        "Attached documents:",
+    ]
+    for doc in context_documents:
+        suffix = f" ({doc['case_year']})" if doc.get("case_year") else ""
+        lines.append(f"- {doc['id']}: {doc.get('title') or doc['id']}{suffix}")
+    return {"role": "user", "content": "\n".join(lines)}
+
 def clip(s, max_chars=16000):
     return s if len(s)<=max_chars else s[:max_chars]
 
@@ -495,11 +543,31 @@ async def chat_agentic_stream(req: AgenticChatRequest):
         except Exception as e:
             print("bad state:", e)
 
+    openai_messages = [
+        msg for msg in openai_messages
+        if not (
+            isinstance(msg, dict)
+            and msg.get("role") == "user"
+            and isinstance(msg.get("content"), str)
+            and msg["content"].startswith("The user attached these indexed documents as chat context.")
+        )
+    ]
+
+    context_documents = resolve_context_documents(req)
+    context_msg = context_documents_message(context_documents)
+    if context_msg:
+        openai_messages.append(context_msg)
+
     last_user_msg = req.messages[-1]['content']
     openai_messages.append({"role": "user", "content": last_user_msg})
     # print(f"openai_messages: {openai_messages}")
 
-    ctx = AgentContext(space=req.space, openai_messages=openai_messages, last_user_msg=last_user_msg)
+    ctx = AgentContext(
+        space=req.space,
+        openai_messages=openai_messages,
+        last_user_msg=last_user_msg,
+        context_documents=context_documents,
+    )
     cfg = AgentConfig(model=settings.OPENAI_CHAT_MODEL, system_prompt=SYSTEM_PROMPT_V1, tools=tools)
 
     # final_answer = ""

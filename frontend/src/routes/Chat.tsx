@@ -5,6 +5,9 @@ import ChatSidebar from "@/components/ChatSidebar";
 import { apiFetch } from "@/hooks/useApi";
 import { supabase } from "@/lib/supabaseClient";
 import { SidebarProvider, SidebarTrigger, SidebarInset } from "@/components/ui/sidebar"
+import { useChatContextDocuments } from "@/context/ChatContextDocuments";
+import { Button } from "@/components/ui/button";
+import { ArrowLeft, FileText, X } from "lucide-react";
 
 // AI Elements
 import {
@@ -68,6 +71,7 @@ export default function Chat() {
     "ready"
   );
   const [currentChatId, setCurrentChatId] = useState<string | null>(null);
+  const { documents: contextDocuments, removeDocument, clearDocuments } = useChatContextDocuments();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const abortRef = useRef<AbortController | null>(null);
@@ -81,6 +85,10 @@ export default function Chat() {
       return null;
     }
   })();
+
+  function returnToSearch() {
+    navigate("/search", { state: { restoreSearchState: true } });
+  }
 
   useEffect(() => {
     let alive = true;
@@ -331,13 +339,18 @@ export default function Chat() {
         pushMessage("user", trimmed);
         setText("");
         await supabase.from("chat_messages").insert({
-            chat_id: chatId, role: "user", content: trimmed, meta: null,
+            chat_id: chatId, role: "user", content: trimmed, meta: { context_documents: contextDocuments },
         });
 
         const res = await fetch(`${API_BASE}/v1/chat/agentic`, {
             method: "POST",
             headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
-            body: JSON.stringify({ space, messages: [{ role: "user", content: trimmed }], state: agentState || null }),
+            body: JSON.stringify({
+              space,
+              messages: [{ role: "user", content: trimmed }],
+              state: agentState || null,
+              context_documents: contextDocuments,
+            }),
         });
         if (!res.ok) throw new Error(`agentic ${res.status}`);
         const data = await res.json();
@@ -365,7 +378,7 @@ export default function Chat() {
     pushMessage("user", trimmed);
     setText("");
     await supabase.from("chat_messages").insert({
-        chat_id: chatId, role: "user", content: trimmed, meta: null,
+        chat_id: chatId, role: "user", content: trimmed, meta: { context_documents: contextDocuments },
     });
 
     // assistant placeholder (we'll stream into it)
@@ -384,7 +397,12 @@ export default function Chat() {
       res = await fetch(`${API_BASE}/v1/chat/agentic/stream`, {
         method: "POST",
         headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
-        body: JSON.stringify({ space, messages: [{ role: "user", content: trimmed }], state: agentState || null }),
+        body: JSON.stringify({
+          space,
+          messages: [{ role: "user", content: trimmed }],
+          state: agentState || null,
+          context_documents: contextDocuments,
+        }),
         signal: controller.signal,
       });
     } catch (err: any) {
@@ -587,6 +605,15 @@ export default function Chat() {
               onChange={(v) => setSpace(v)}
               className="ml-1 h-11 w-80 rounded-xl"
             />
+            <Button
+              type="button"
+              variant="outline"
+              onClick={returnToSearch}
+              className="ml-auto h-10 shrink-0 rounded-xl"
+            >
+              <ArrowLeft className="h-4 w-4" aria-hidden="true" />
+              Volver a búsqueda
+            </Button>
           </div>
 
           {/* Messages area - scrollable content */}
@@ -651,6 +678,44 @@ export default function Chat() {
             {/* <Textarea className="bg-white w-full max-w-2xl mx-auto shrink-0" placeholder="Type your message here." /> */}
             {/* <div className="fixed bottom-0 left-0 right-0 bg-[#F5F5F7] pb-3"> */}
             <div className="mx-auto max-w-3xl w-full shrink-0 px-3 pb-3">
+              {contextDocuments.length > 0 && (
+                <div className="mb-2 rounded-lg border border-gray-200 bg-white px-3 py-2 shadow-sm">
+                  <div className="mb-2 flex items-center justify-between gap-3">
+                    <div className="text-xs font-medium uppercase text-gray-500">
+                      Contexto del chat
+                    </div>
+                    <button
+                      type="button"
+                      onClick={clearDocuments}
+                      className="text-xs text-gray-500 transition hover:text-gray-900"
+                    >
+                      Quitar todos
+                    </button>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    {contextDocuments.map((doc) => (
+                      <span
+                        key={`${doc.space}:${doc.id}`}
+                        className="inline-flex max-w-full items-center gap-2 rounded-md border border-gray-200 bg-gray-50 px-2.5 py-1.5 text-sm text-gray-800"
+                      >
+                        <FileText className="h-4 w-4 shrink-0 text-gray-500" aria-hidden="true" />
+                        <span className="min-w-0 truncate">
+                          {doc.title || doc.id}
+                          {doc.case_year ? ` · ${doc.case_year}` : ""}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => removeDocument(doc.space, doc.id)}
+                          aria-label={`Quitar ${doc.title || doc.id} del contexto`}
+                          className="rounded p-0.5 text-gray-500 transition hover:bg-gray-200 hover:text-gray-900"
+                        >
+                          <X className="h-3.5 w-3.5" aria-hidden="true" />
+                        </button>
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
               <PromptInput
                 onSubmit={handleSubmit}
                 className="bg-white rounded-2xl shadow-lg transition-colors hover:bg-gray-50"

@@ -1,9 +1,10 @@
 import { useState, useEffect } from "react";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import { apiFetch } from "@/hooks/useApi";
 import { supabase } from "@/lib/supabaseClient";
 import SpaceSelect  from "@/components/SpaceSelect";
 import SearchResultCard from "@/components/SearchResultCard";
+import { useChatContextDocuments } from "@/context/ChatContextDocuments";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -15,22 +16,75 @@ import {
 } from "@/components/ui/select";
 import { Search as SearchIcon } from "lucide-react";
 
+const SEARCH_STATE_KEY = "encuentra.searchState";
+
+function defaultSearchState() {
+  return {
+    q: "",
+    space: "",
+    topK: "10",
+    year: "",
+    results: [],
+    searched: false,
+  };
+}
+
+function loadSearchStateForRestore(shouldRestore) {
+  try {
+    if (!shouldRestore) {
+      return defaultSearchState();
+    }
+    const raw = window.sessionStorage.getItem(SEARCH_STATE_KEY);
+    if (!raw) return defaultSearchState();
+    const parsed = JSON.parse(raw);
+    return {
+      ...defaultSearchState(),
+      ...parsed,
+      results: Array.isArray(parsed.results) ? parsed.results : [],
+      searched: Boolean(parsed.searched),
+      topK: parsed.topK ? String(parsed.topK) : "10",
+    };
+  } catch {
+    return defaultSearchState();
+  }
+}
+
+function saveSearchState(state) {
+  try {
+    window.sessionStorage.setItem(SEARCH_STATE_KEY, JSON.stringify(state));
+  } catch {
+    // Search remains usable even when session storage is unavailable.
+  }
+}
+
 export default function Search() {
   const navigate = useNavigate();
-  const [q, setQ]           = useState("");
+  const location = useLocation();
+  const { addDocument, isSelected } = useChatContextDocuments();
+  const [initialSearchState] = useState(() =>
+    loadSearchStateForRestore(Boolean(location.state?.restoreSearchState))
+  );
+  const [q, setQ]           = useState(initialSearchState.q);
   const [_spaces, setSpaces] = useState([]);
-  const [space, setSpace]   = useState("");
-  const [topK, setTopK] = useState("10");
-  const [year, setYear] = useState("");
-  const [results, setResults] = useState([]);
-  const [searched, setSearched] = useState(false);
+  const [space, setSpace]   = useState(initialSearchState.space);
+  const [topK, setTopK] = useState(initialSearchState.topK);
+  const [year, setYear] = useState(initialSearchState.year);
+  const [results, setResults] = useState(initialSearchState.results);
+  const [searched, setSearched] = useState(initialSearchState.searched);
   useEffect(() => {
     apiFetch("user/spaces").then((d) => {
       const s = d.spaces || [];
       setSpaces(s);
-      if (s.length > 0) setSpace(s[0]);
+      if (s.length > 0) {
+        setSpace((prev) => (prev && s.includes(prev) ? prev : s[0]));
+      }
     }).catch((e) => console.error("Failed to fetch spaces", e));
   }, []);
+
+  useEffect(() => {
+    if (!space) return;
+    saveSearchState({ q, space, topK, year, results, searched });
+  }, [q, space, topK, year, results, searched]);
 
   const [loading, setLoading] = useState(false);
   const [feedbackById, setFeedbackById] = useState({});
@@ -156,6 +210,9 @@ export default function Search() {
                   space={space}
                   feedback={fb}
                   onFeedback={sendFeedback}
+                  onAddToChat={addDocument}
+                  onOpenChat={() => navigate("/chat")}
+                  isInChatContext={isSelected(space, res.id)}
                 />
                 {isToast && (
                   <div

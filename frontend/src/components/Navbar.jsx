@@ -88,6 +88,11 @@ export default function Navbar() {
     navigate('/login');
   }
 
+  function handleSearchNav(event) {
+    event.preventDefault();
+    navigate('/search', { state: { restoreSearchState: true } });
+  }
+
   return (
     <nav ref={navRef} className="bg-white shadow-md z-30 relative">
       <div className="container mx-auto px-4 py-3 flex items-center justify-between max-w-full">
@@ -95,7 +100,7 @@ export default function Navbar() {
           <img src={logo} alt="Encuentra logo" className="w-32" />
         </Link>
         <div className="space-x-4 flex items-center">
-          <Link to="/search" className="text-gray-600 hover:text-gray-700">
+          <Link to="/search" onClick={handleSearchNav} className="text-gray-600 hover:text-gray-700">
             Buscar
           </Link>
           <Link to="/chat" className="text-gray-600 hover:text-gray-700">

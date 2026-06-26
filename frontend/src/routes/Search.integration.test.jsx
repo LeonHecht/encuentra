@@ -60,6 +60,7 @@ describe('<Search />', () => {
   beforeEach(() => {
     apiMock.mockClear()
     getSessionMock.mockReset()
+    window.sessionStorage.clear()
     getSessionMock.mockResolvedValue({
       data: { session: { access_token: 'test-token' } },
       error: null,
@@ -106,5 +107,28 @@ describe('<Search />', () => {
     await userEvent.click(btn)
 
     await screen.findByText(/No se encontraron resultados\./)
+  })
+
+  it('restores the previous search when navigation requests it', async () => {
+    window.sessionStorage.setItem('encuentra.searchState', JSON.stringify({
+      q: 'derecho',
+      space: 'public',
+      topK: '10',
+      year: '2020',
+      searched: true,
+      results: [
+        { id: 'doc-1', title: 'Sentencia 123/2020', score: 0.87, snippet: 'derecho constitucional' },
+      ],
+    }))
+
+    render(
+      <MemoryRouter initialEntries={[{ pathname: '/search', state: { restoreSearchState: true } }]}>
+        <Search />
+      </MemoryRouter>
+    )
+
+    expect(await screen.findByDisplayValue('derecho')).toBeInTheDocument()
+    expect(screen.getByDisplayValue('2020')).toBeInTheDocument()
+    expect(screen.getByText(/Sentencia 123\/2020/)).toBeInTheDocument()
   })
 })
