@@ -76,3 +76,12 @@ it('logout triggers supabase signOut and navigates to /login', async () => {
   await waitFor(() => expect(signOut).toHaveBeenCalledTimes(1));
   expect(mockNavigate).toHaveBeenCalledWith('/login');
 });
+
+it('search link requests restoring the previous search', async () => {
+  setup();
+  await userEvent.click(screen.getByRole('link', { name: /Buscar/i }));
+
+  expect(mockNavigate).toHaveBeenCalledWith('/search', {
+    state: { restoreSearchState: true },
+  });
+});

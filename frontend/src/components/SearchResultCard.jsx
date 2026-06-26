@@ -5,6 +5,8 @@ import {
   ChevronUp,
   ExternalLink,
   FileText,
+  Check,
+  MessageSquare,
   Scale,
   ThumbsDown,
   ThumbsUp,
@@ -68,7 +70,15 @@ function InfoRow({ icon: Icon, label, children }) {
   );
 }
 
-export default function SearchResultCard({ result, space, feedback, onFeedback }) {
+export default function SearchResultCard({
+  result,
+  space,
+  feedback,
+  onFeedback,
+  onAddToChat,
+  onOpenChat,
+  isInChatContext = false,
+}) {
   const [metadataStatus, setMetadataStatus] = useState(result.metadata_status || "missing");
   const [metadata, setMetadata] = useState(result.metadata || null);
   const [expanded, setExpanded] = useState(false);
@@ -207,6 +217,43 @@ export default function SearchResultCard({ result, space, feedback, onFeedback }
             <ExternalLink className="h-4 w-4" aria-hidden="true" />
             Abrir PDF
           </a>
+        )}
+        <button
+          type="button"
+          onClick={() => {
+            if (isInChatContext) {
+              onOpenChat?.();
+              return;
+            }
+            onAddToChat?.({
+              id: result.id,
+              space,
+              title,
+              case_year: result.case_year ?? null,
+              download_url: result.download_url || null,
+            });
+          }}
+          className={`inline-flex min-h-10 items-center gap-2 rounded-md px-4 py-2 text-sm transition ${
+            isInChatContext
+              ? "border border-gray-300 bg-white text-gray-900 hover:bg-gray-50"
+              : "bg-gray-950 text-white hover:bg-gray-800"
+          }`}
+        >
+          {isInChatContext ? (
+            <Check className="h-4 w-4" aria-hidden="true" />
+          ) : (
+            <MessageSquare className="h-4 w-4" aria-hidden="true" />
+          )}
+          {isInChatContext ? "Añadido" : "Usar en chat"}
+        </button>
+        {isInChatContext && (
+          <button
+            type="button"
+            onClick={onOpenChat}
+            className="inline-flex min-h-10 items-center rounded-md border border-gray-200 bg-white px-4 py-2 text-sm text-gray-900 transition hover:bg-gray-50"
+          >
+            Ir al chat
+          </button>
         )}
         <div className="ml-auto flex gap-2">
           <button
