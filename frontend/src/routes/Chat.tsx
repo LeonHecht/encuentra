@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, useCallback } from "react";
+import { useNavigate } from "react-router-dom";
 import SpaceSelect from "@/components/SpaceSelect";
 import ChatSidebar from "@/components/ChatSidebar";
 import { apiFetch } from "@/hooks/useApi";
@@ -51,6 +52,7 @@ type ChatMsg = {
 };
 
 export default function Chat() {
+  const navigate = useNavigate();
   // Avoid double slashes when VITE_API_BASE ends with '/'
   const API_BASE = (import.meta.env.VITE_API_BASE || "http://localhost:8000").replace(/\/+$/, "");
 
@@ -447,6 +449,13 @@ export default function Chat() {
   async function handleSubmit() {
     const trimmed = text.trim();
     if (!trimmed || status !== "ready") return;
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+    if (!session) {
+      navigate("/signup");
+      return;
+    }
     setStatus("submitted");
     try {
       if (useStreaming) {

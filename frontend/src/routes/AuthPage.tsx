@@ -5,12 +5,20 @@ import { useAuth } from "@/context/AuthContext";
 import SignUpForm from "@/components/SignUpForm";
 import SignInForm from "@/components/SignInForm";
 
-export default function AuthPage() {
+type AuthPageProps = {
+  initialView?: "sign_in" | "sign_up";
+};
+
+export default function AuthPage({ initialView = "sign_in" }: AuthPageProps) {
   const navigate = useNavigate();
   const { session } = useAuth();
-  const [view, setView] = useState<"sign_in" | "sign_up">("sign_in");
+  const [view, setView] = useState<"sign_in" | "sign_up">(initialView);
   const [sharedEmail, setSharedEmail] = useState("");
   const [sharedPassword, setSharedPassword] = useState("");
+
+  useEffect(() => {
+    setView(initialView);
+  }, [initialView]);
 
   useEffect(() => {
     // Redirect to home if user is already authenticated
