@@ -23,6 +23,10 @@ from starlette.datastructures import UploadFile
 # These tests now target the OpenSearch backend (default in settings).
 
 
+def _chat_user():
+    return auth.UserData(user_id="user-1", username="alice", spaces=["personal"])
+
+
 @pytest.fixture()
 def test_env(tmp_path, monkeypatch):
     """Prepare temp dirs, reset databases and index a small document."""
@@ -122,6 +126,21 @@ def test_chat_search_cases_passes_exact_year_filter(monkeypatch):
     assert captured["year"] == 1995
 
 
+def test_stream_rejects_inaccessible_space(monkeypatch):
+    monkeypatch.setattr(chat_ep, "get_accessible_spaces", lambda user: ["personal"])
+
+    req = chat_ep.AgenticChatRequest(
+        space="other-space",
+        messages=[{"role": "user", "content": "Hola"}],
+    )
+
+    with pytest.raises(chat_ep.HTTPException) as exc:
+        asyncio.run(chat_ep.chat_agentic_stream(req, user=_chat_user()))
+
+    assert exc.value.status_code == 403
+    assert exc.value.detail == "Space not accessible"
+
+
 def test_file_upload_creates_file_and_indexes(test_env, monkeypatch):
     user = test_env
     uploaded = UploadFile(filename="new.txt", file=io.BytesIO(b"some content"))
@@ -140,6 +159,8 @@ def test_file_upload_creates_file_and_indexes(test_env, monkeypatch):
 
 
 def test_stream_emits_progress_before_tool_execution(monkeypatch):
+    monkeypatch.setattr(chat_ep, "get_accessible_spaces", lambda user: ["personal"])
+
     class FakeStream:
         def __init__(self, events):
             self.events = events
@@ -184,7 +205,7 @@ def test_stream_emits_progress_before_tool_execution(monkeypatch):
             space="personal",
             messages=[{"role": "user", "content": "Analiza ventas"}],
         )
-        response = await chat_ep.chat_agentic_stream(req)
+        response = await chat_ep.chat_agentic_stream(req, user=_chat_user())
         chunks = []
         async for chunk in response.body_iterator:
             chunks.append(chunk.decode("utf-8"))
@@ -198,6 +219,8 @@ def test_stream_emits_progress_before_tool_execution(monkeypatch):
 
 
 def test_stream_converts_plain_emit_event_json_to_progress(monkeypatch):
+    monkeypatch.setattr(chat_ep, "get_accessible_spaces", lambda user: ["personal"])
+
     class FakeStream:
         def __init__(self, events):
             self.events = events
@@ -236,7 +259,7 @@ def test_stream_converts_plain_emit_event_json_to_progress(monkeypatch):
             space="personal",
             messages=[{"role": "user", "content": "Promedio por país"}],
         )
-        response = await chat_ep.chat_agentic_stream(req)
+        response = await chat_ep.chat_agentic_stream(req, user=_chat_user())
         chunks = []
         async for chunk in response.body_iterator:
             chunks.append(chunk.decode("utf-8"))
@@ -252,6 +275,8 @@ def test_stream_converts_plain_emit_event_json_to_progress(monkeypatch):
 
 
 def test_stream_emits_progress_when_tool_call_item_is_added(monkeypatch):
+    monkeypatch.setattr(chat_ep, "get_accessible_spaces", lambda user: ["personal"])
+
     class FakeStream:
         def __init__(self, events):
             self.events = events
@@ -300,7 +325,7 @@ def test_stream_emits_progress_when_tool_call_item_is_added(monkeypatch):
             space="personal",
             messages=[{"role": "user", "content": "Busca jurisprudencia"}],
         )
-        response = await chat_ep.chat_agentic_stream(req)
+        response = await chat_ep.chat_agentic_stream(req, user=_chat_user())
         chunks = []
         async for chunk in response.body_iterator:
             chunks.append(chunk.decode("utf-8"))

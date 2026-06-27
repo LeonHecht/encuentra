@@ -12,6 +12,7 @@ from openai import OpenAI
 from backend.app.core.config import settings
 from backend.app.services.search import search_engine
 from backend.app.dependencies import get_current_user
+from backend.app.services.auth import get_accessible_spaces, UserData
 
 from dataclasses import dataclass, field
 from typing import Any, List, Dict, Optional
@@ -532,7 +533,12 @@ import asyncio
 import json
 
 @router.post("/chat/agentic/stream")
-async def chat_agentic_stream(req: AgenticChatRequest):
+async def chat_agentic_stream(
+    req: AgenticChatRequest,
+    user: UserData = Depends(get_current_user),
+):
+    if req.space not in get_accessible_spaces(user):
+        raise HTTPException(403, detail="Space not accessible")
 
     openai_messages: list[dict[str, Any]] = []
     if req.state:
