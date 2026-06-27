@@ -77,15 +77,6 @@ export default function Chat() {
   const abortRef = useRef<AbortController | null>(null);
   const useStreaming: boolean = true;
 
-  const token = (() => {
-    try {
-      const raw = localStorage.getItem("auth");
-      return raw ? (JSON.parse(raw).token as string) : null;
-    } catch {
-      return null;
-    }
-  })();
-
   function returnToSearch() {
     navigate("/search", { state: { restoreSearchState: true } });
   }
@@ -242,7 +233,7 @@ export default function Chat() {
   function appendAssistantDelta(assistantId: string, delta: string) {
     setMessages((prev) =>
       prev.map((m) =>
-      m.id === assistantId ? { ...m, text: (m.text || "") + delta } : m
+        m.id === assistantId ? { ...m, text: (m.text || "") + delta } : m
       )
     );
   }
@@ -268,9 +259,9 @@ export default function Chat() {
 
   function finalizeAssistant(assistantId: string, fullText: string, citations?: ChatMsg["citations"]) {
     setMessages((prev) =>
-        prev.map((m) =>
+      prev.map((m) =>
         m.id === assistantId ? { ...m, text: fullText, citations: citations || [] } : m
-        )
+      )
     );
   }
 
@@ -299,11 +290,11 @@ export default function Chat() {
       prev.map((m) =>
         m.id === assistantId
           ? {
-              ...m,
-              reasoningStreaming: streaming,
-              reasoningStartedAt: m.reasoningStartedAt ?? now,
-              reasoningEndedAt: streaming ? undefined : m.reasoningEndedAt ?? now,
-            }
+            ...m,
+            reasoningStreaming: streaming,
+            reasoningStartedAt: m.reasoningStartedAt ?? now,
+            reasoningEndedAt: streaming ? undefined : m.reasoningEndedAt ?? now,
+          }
           : m
       )
     );
@@ -331,64 +322,63 @@ export default function Chat() {
     return Math.max(1, Math.ceil((endedAt - startedAt) / 1000));
   }
 
-    async function handleSubmitNonStream(trimmed: string) {
-        // Ensure we have a chat ID, creating one if needed
-        const chatId = await ensureChat(trimmed.slice(0, 60));
-
-        // user message (UI + persist)
-        pushMessage("user", trimmed);
-        setText("");
-        await supabase.from("chat_messages").insert({
-            chat_id: chatId, role: "user", content: trimmed, meta: { context_documents: contextDocuments },
-        });
-
-        const res = await fetch(`${API_BASE}/v1/chat/agentic`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
-            body: JSON.stringify({
-              space,
-              messages: [{ role: "user", content: trimmed }],
-              state: agentState || null,
-              context_documents: contextDocuments,
-            }),
-        });
-        if (!res.ok) throw new Error(`agentic ${res.status}`);
-        const data = await res.json();
-
-        if (data.title) {
-            setTitle(data.title);
-            await supabase.from("chats").update({ title: data.title }).eq("id", chatId);
-            try { window.dispatchEvent(new CustomEvent("chat:updated", { detail: { id: chatId, title: data.title } })); } catch {}
-        }
-        if (data.agent_state) {
-            setAgentState(data.agent_state);
-            await supabase.from("chats").update({ agent_state: data.agent_state }).eq("id", chatId);
-        }
-
-        await supabase.from("chat_messages").insert({
-            chat_id: chatId, role: "assistant", content: data.answer || "", meta: { citations: data.citations || [] },
-        });
-        pushMessage("assistant", data.answer || "", data.citations || []);
-    }
-
-  async function handleSubmitStream(trimmed: string) {
+  async function handleSubmitNonStream(trimmed: string, accessToken: string) {
     const chatId = await ensureChat(trimmed.slice(0, 60));
 
     // user message (UI + persist)
     pushMessage("user", trimmed);
     setText("");
     await supabase.from("chat_messages").insert({
-        chat_id: chatId, role: "user", content: trimmed, meta: { context_documents: contextDocuments },
+      chat_id: chatId, role: "user", content: trimmed, meta: { context_documents: contextDocuments },
+    });
+
+    const res = await fetch(`${API_BASE}/v1/chat/agentic`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
+      body: JSON.stringify({
+        space,
+        messages: [{ role: "user", content: trimmed }],
+        state: agentState || null,
+        context_documents: contextDocuments,
+      }),
+    });
+    if (!res.ok) throw new Error(`agentic ${res.status}`);
+    const data = await res.json();
+
+    if (data.title) {
+      setTitle(data.title);
+      await supabase.from("chats").update({ title: data.title }).eq("id", chatId);
+      try { window.dispatchEvent(new CustomEvent("chat:updated", { detail: { id: chatId, title: data.title } })); } catch { }
+    }
+    if (data.agent_state) {
+      setAgentState(data.agent_state);
+      await supabase.from("chats").update({ agent_state: data.agent_state }).eq("id", chatId);
+    }
+
+    await supabase.from("chat_messages").insert({
+      chat_id: chatId, role: "assistant", content: data.answer || "", meta: { citations: data.citations || [] },
+    });
+    pushMessage("assistant", data.answer || "", data.citations || []);
+  }
+
+  async function handleSubmitStream(trimmed: string, accessToken: string) {
+    const chatId = await ensureChat(trimmed.slice(0, 60));
+
+    // user message (UI + persist)
+    pushMessage("user", trimmed);
+    setText("");
+    await supabase.from("chat_messages").insert({
+      chat_id: chatId, role: "user", content: trimmed, meta: { context_documents: contextDocuments },
     });
 
     // assistant placeholder (we'll stream into it)
     const assistantId = pushAssistantPlaceholder();
-    
+
     // Prepare abort controller so we can cancel mid-stream
     const controller = new AbortController();
     abortRef.current = controller;
     setStatus("streaming");
-    
+
     // Local buffer to persist reasoning lines for this assistant turn
     const reasoningBuf: string[] = [];
 
@@ -396,7 +386,7 @@ export default function Chat() {
     try {
       res = await fetch(`${API_BASE}/v1/chat/agentic/stream`, {
         method: "POST",
-        headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
         body: JSON.stringify({
           space,
           messages: [{ role: "user", content: trimmed }],
@@ -427,7 +417,7 @@ export default function Chat() {
     const handleFrame = async (event: string, dataStr: string) => {
       if (dataStr === "[DONE]") return;
       let payload: any = {};
-      try { payload = dataStr ? JSON.parse(dataStr) : {}; } catch {}
+      try { payload = dataStr ? JSON.parse(dataStr) : {}; } catch { }
 
       switch (event) {
         case "response.emit_message": {
@@ -435,51 +425,51 @@ export default function Chat() {
           // Attach emitted reasoning message to the current assistant message
           addReasoningLine(assistantId, msg);
           if (reasoningBuf[reasoningBuf.length - 1] !== msg) reasoningBuf.push(msg);
-                  break;
+          break;
         }
         case "response.output_text.delta": {
-            const delta = payload.delta ?? payload.text ?? payload.content ?? "";
-            streamedAnswer += delta;
-            // As soon as the assistant starts typing, stop thinking and show duration immediately
-            finishReasoningNow(assistantId);
-            await appendAssistantDeltaAnimated(assistantId, delta);
-            break;
+          const delta = payload.delta ?? payload.text ?? payload.content ?? "";
+          streamedAnswer += delta;
+          // As soon as the assistant starts typing, stop thinking and show duration immediately
+          finishReasoningNow(assistantId);
+          await appendAssistantDeltaAnimated(assistantId, delta);
+          break;
         }
         case "response.output_text.done": {
-            if (payload.text && payload.text !== streamedAnswer) {
-              streamedAnswer = payload.text;
-              finalizeAssistant(assistantId, streamedAnswer);
-            }
-            // optional: nothing; we’ll finalize on response.completed
-            break;
+          if (payload.text && payload.text !== streamedAnswer) {
+            streamedAnswer = payload.text;
+            finalizeAssistant(assistantId, streamedAnswer);
+          }
+          // optional: nothing; we’ll finalize on response.completed
+          break;
         }
         case "response.completed": {
-            completedReceived = true;
-            const answer = payload.answer || streamedAnswer;
-            const citations = payload.citations ?? [];
-            const title = payload.title ?? "";
-            const newState = payload.agent_state ?? null;
+          completedReceived = true;
+          const answer = payload.answer || streamedAnswer;
+          const citations = payload.citations ?? [];
+          const title = payload.title ?? "";
+          const newState = payload.agent_state ?? null;
 
-            finalizeAssistant(assistantId, answer, citations);
+          finalizeAssistant(assistantId, answer, citations);
 
-            if (title) {
-                setTitle(title);
-                await supabase.from("chats").update({ title }).eq("id", chatId);
-                try { window.dispatchEvent(new CustomEvent("chat:updated", { detail: { id: chatId, title } })); } catch {}
-            }
-            if (newState) {
-                setAgentState(newState);
-                await supabase.from("chats").update({ agent_state: newState }).eq("id", chatId);
-            }
+          if (title) {
+            setTitle(title);
+            await supabase.from("chats").update({ title }).eq("id", chatId);
+            try { window.dispatchEvent(new CustomEvent("chat:updated", { detail: { id: chatId, title } })); } catch { }
+          }
+          if (newState) {
+            setAgentState(newState);
+            await supabase.from("chats").update({ agent_state: newState }).eq("id", chatId);
+          }
 
-            await supabase.from("chat_messages").insert({
-                      chat_id: chatId, role: "assistant", content: answer, meta: { citations, reasoning: reasoningBuf },
-            });
+          await supabase.from("chat_messages").insert({
+            chat_id: chatId, role: "assistant", content: answer, meta: { citations, reasoning: reasoningBuf },
+          });
 
-            setStatus("ready");
-            // Streaming finished; allow Reasoning to auto-close for this message
-            setMessageReasoningStreaming(assistantId, false);
-            break;
+          setStatus("ready");
+          // Streaming finished; allow Reasoning to auto-close for this message
+          setMessageReasoningStreaming(assistantId, false);
+          break;
         }
 
         // (optional) show trace / reasoning in a side panel if you want:
@@ -489,9 +479,9 @@ export default function Chat() {
         case "tool.start":
         case "tool.result":
         case "trace":
-            // you can dispatch to a debug pane here
-            break;
-        }
+          // you can dispatch to a debug pane here
+          break;
+      }
     };
 
     const parseFrame = (frame: string) => {
@@ -556,25 +546,26 @@ export default function Chat() {
       navigate("/signup");
       return;
     }
+    const accessToken = session.access_token;
     setStatus("submitted");
     try {
       if (useStreaming) {
-        await handleSubmitStream(trimmed);
+        await handleSubmitStream(trimmed, accessToken);
       } else {
-        await handleSubmitNonStream(trimmed);
+        await handleSubmitNonStream(trimmed, accessToken);
       }
     } catch (err) {
-        console.error("submit error", err);
-        pushMessage("assistant", "Ocurrió un error procesando tu consulta.");
+      console.error("submit error", err);
+      pushMessage("assistant", "Ocurrió un error procesando tu consulta.");
     } finally {
       if (!useStreaming) setStatus("ready"); // streaming sets status itself
     }
   }
 
   function stopStreaming() {
-  try {
-    abortRef.current?.abort();
-  } catch {}
+    try {
+      abortRef.current?.abort();
+    } catch { }
   }
 
   return (
@@ -597,34 +588,33 @@ export default function Chat() {
 
       {/* Main content inside the SidebarInset so it accounts for the sidebar gap */}
       <SidebarInset className="flex flex-col flex-1 min-h-0 min-w-0 overflow-hidden bg-[#F5F5F7]">
-          {/* Sidebar toggle + Space selector (sticky below navbar) */}
-          <div className="flex items-center gap-4 p-4">
-            <SidebarTrigger />
-            <SpaceSelect
-              value={space}
-              onChange={(v) => setSpace(v)}
-              className="ml-1 h-11 w-80 rounded-xl"
-            />
-            <Button
-              type="button"
-              variant="outline"
-              onClick={returnToSearch}
-              className="ml-auto h-10 shrink-0 rounded-xl"
-            >
-              <ArrowLeft className="h-4 w-4" aria-hidden="true" />
-              Volver a búsqueda
-            </Button>
-          </div>
+        {/* Sidebar toggle + Space selector (sticky below navbar) */}
+        <div className="flex items-center gap-4 p-4">
+          <SidebarTrigger />
+          <SpaceSelect
+            value={space}
+            onChange={(v) => setSpace(v)}
+            className="ml-1 h-11 w-80 rounded-xl"
+          />
+          <Button
+            type="button"
+            variant="outline"
+            onClick={returnToSearch}
+            className="ml-auto h-10 shrink-0 rounded-xl"
+          >
+            <ArrowLeft className="h-4 w-4" aria-hidden="true" />
+            Volver a búsqueda
+          </Button>
+        </div>
 
-          {/* Messages area - scrollable content */}
-          <div className="flex flex-col flex-1 min-h-0 overflow-hidden">
-            <div
-              className={`flex-1 min-h-0 overflow-y-auto px-3 pt-2 ${
-                messages.length > 0 ? "pb-24" : "pb-6"
+        {/* Messages area - scrollable content */}
+        <div className="flex flex-col flex-1 min-h-0 overflow-hidden">
+          <div
+            className={`flex-1 min-h-0 overflow-y-auto px-3 pt-2 ${messages.length > 0 ? "pb-24" : "pb-6"
               }`}
-              ref={scrollContainerRef}
-            >
-              <div className="mx-auto w-full max-w-4xl">
+            ref={scrollContainerRef}
+          >
+            <div className="mx-auto w-full max-w-4xl">
               <Conversation>
                 <ConversationContent>
                   {messages.length === 0 ? (
@@ -652,7 +642,7 @@ export default function Chat() {
                           )}
                           {m.role === "assistant" && status === "streaming" && (!m.reasoning || m.reasoning.length === 0) && (m.text ?? "") === "" && (
                             <div className="mb-3 text-muted-foreground text-sm">
-                              <Shimmer duration={2} spread={4}>Analizando…</Shimmer>
+                              <Shimmer duration={2} spread={4}>Pensando…</Shimmer>
                             </div>
                           )}
                           {m.role === "assistant" ? (
@@ -672,78 +662,78 @@ export default function Chat() {
                 </ConversationContent>
                 <ConversationScrollButton />
               </Conversation>
-              </div>
-            </div>
-            {/* Input fixed at bottom of screen */}
-            {/* <Textarea className="bg-white w-full max-w-2xl mx-auto shrink-0" placeholder="Type your message here." /> */}
-            {/* <div className="fixed bottom-0 left-0 right-0 bg-[#F5F5F7] pb-3"> */}
-            <div className="mx-auto max-w-3xl w-full shrink-0 px-3 pb-3">
-              {contextDocuments.length > 0 && (
-                <div className="mb-2 rounded-lg border border-gray-200 bg-white px-3 py-2 shadow-sm">
-                  <div className="mb-2 flex items-center justify-between gap-3">
-                    <div className="text-xs font-medium uppercase text-gray-500">
-                      Contexto del chat
-                    </div>
-                    <button
-                      type="button"
-                      onClick={clearDocuments}
-                      className="text-xs text-gray-500 transition hover:text-gray-900"
-                    >
-                      Quitar todos
-                    </button>
-                  </div>
-                  <div className="flex flex-wrap gap-2">
-                    {contextDocuments.map((doc) => (
-                      <span
-                        key={`${doc.space}:${doc.id}`}
-                        className="inline-flex max-w-full items-center gap-2 rounded-md border border-gray-200 bg-gray-50 px-2.5 py-1.5 text-sm text-gray-800"
-                      >
-                        <FileText className="h-4 w-4 shrink-0 text-gray-500" aria-hidden="true" />
-                        <span className="min-w-0 truncate">
-                          {doc.title || doc.id}
-                          {doc.case_year ? ` · ${doc.case_year}` : ""}
-                        </span>
-                        <button
-                          type="button"
-                          onClick={() => removeDocument(doc.space, doc.id)}
-                          aria-label={`Quitar ${doc.title || doc.id} del contexto`}
-                          className="rounded p-0.5 text-gray-500 transition hover:bg-gray-200 hover:text-gray-900"
-                        >
-                          <X className="h-3.5 w-3.5" aria-hidden="true" />
-                        </button>
-                      </span>
-                    ))}
-                  </div>
-                </div>
-              )}
-              <PromptInput
-                onSubmit={handleSubmit}
-                className="bg-white rounded-2xl shadow-lg transition-colors hover:bg-gray-50"
-              >
-                <PromptInputBody>
-                  <PromptInputTextarea
-                    ref={textareaRef}
-                    value={text}
-                    onChange={(e) => setText(e.target.value)}
-                    placeholder="Pregunta lo que quieras a tu asistente legal…"
-                  />
-                </PromptInputBody>
-                <PromptInputFooter>
-                  <PromptInputTools />
-                  <PromptInputSubmit
-                    disabled={status === "submitted" || (status !== "streaming" && !text)}
-                    status={status}
-                    onClick={(e) => {
-                      if (status === "streaming") {
-                        e.preventDefault();
-                        stopStreaming();
-                      }
-                    }}
-                  />
-                </PromptInputFooter>
-              </PromptInput>
             </div>
           </div>
+          {/* Input fixed at bottom of screen */}
+          {/* <Textarea className="bg-white w-full max-w-2xl mx-auto shrink-0" placeholder="Type your message here." /> */}
+          {/* <div className="fixed bottom-0 left-0 right-0 bg-[#F5F5F7] pb-3"> */}
+          <div className="mx-auto max-w-3xl w-full shrink-0 px-3 pb-3">
+            {contextDocuments.length > 0 && (
+              <div className="mb-2 rounded-lg border border-gray-200 bg-white px-3 py-2 shadow-sm">
+                <div className="mb-2 flex items-center justify-between gap-3">
+                  <div className="text-xs font-medium uppercase text-gray-500">
+                    Contexto del chat
+                  </div>
+                  <button
+                    type="button"
+                    onClick={clearDocuments}
+                    className="text-xs text-gray-500 transition hover:text-gray-900"
+                  >
+                    Quitar todos
+                  </button>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {contextDocuments.map((doc) => (
+                    <span
+                      key={`${doc.space}:${doc.id}`}
+                      className="inline-flex max-w-full items-center gap-2 rounded-md border border-gray-200 bg-gray-50 px-2.5 py-1.5 text-sm text-gray-800"
+                    >
+                      <FileText className="h-4 w-4 shrink-0 text-gray-500" aria-hidden="true" />
+                      <span className="min-w-0 truncate">
+                        {doc.title || doc.id}
+                        {doc.case_year ? ` · ${doc.case_year}` : ""}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => removeDocument(doc.space, doc.id)}
+                        aria-label={`Quitar ${doc.title || doc.id} del contexto`}
+                        className="rounded p-0.5 text-gray-500 transition hover:bg-gray-200 hover:text-gray-900"
+                      >
+                        <X className="h-3.5 w-3.5" aria-hidden="true" />
+                      </button>
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
+            <PromptInput
+              onSubmit={handleSubmit}
+              className="bg-white rounded-2xl shadow-lg transition-colors hover:bg-gray-50"
+            >
+              <PromptInputBody>
+                <PromptInputTextarea
+                  ref={textareaRef}
+                  value={text}
+                  onChange={(e) => setText(e.target.value)}
+                  placeholder="Pregunta lo que quieras a tu asistente legal…"
+                />
+              </PromptInputBody>
+              <PromptInputFooter>
+                <PromptInputTools />
+                <PromptInputSubmit
+                  disabled={status === "submitted" || (status !== "streaming" && !text)}
+                  status={status}
+                  onClick={(e) => {
+                    if (status === "streaming") {
+                      e.preventDefault();
+                      stopStreaming();
+                    }
+                  }}
+                />
+              </PromptInputFooter>
+            </PromptInput>
+          </div>
+        </div>
       </SidebarInset>
       {/* </div> */}
     </SidebarProvider>

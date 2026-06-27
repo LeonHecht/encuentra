@@ -39,11 +39,11 @@ class Settings(BaseSettings):
 
     # --- OpenAI ---
     OPENAI_API_KEY: str | None = None
-    OPENAI_CHAT_MODEL: str = "gpt-5-nano"   # fall back to gpt-5-nano (will be overwritten by .env.[stage] files)
+    OPENAI_CHAT_MODEL: str = "gpt-5.4-mini"   # fall back to gpt-5.4-nano (will be overwritten by .env.[stage] files)
     MAX_DOC_TOKENS: int = 2000
     MAX_DOCS: int = 3
     CASE_METADATA_AUTO_ENRICH: bool = True
-    CASE_METADATA_MODEL: str = "gpt-5-nano"
+    CASE_METADATA_MODEL: str = "gpt-5.4-nano"
     CASE_METADATA_REASONING_EFFORT: str = "none"  # none | low | medium | high | xhigh
     CASE_METADATA_MAX_RETRIES: int = 2
     CASE_METADATA_PENDING_RETRY_MINUTES: int = 10
