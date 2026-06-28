@@ -45,9 +45,48 @@ class UserData:
     last_name: str = ""
     spaces: List[str] = field(default_factory=list)
     organization: Optional[str] = None
+    access_token: Optional[str] = None
 
 
-def get_or_create_user_from_supabase(user_id: str, email: str, user_metadata: Optional[dict] = None) -> UserData:
+def get_supabase_for_user(user: UserData) -> Client:
+    """Return Supabase client with the caller JWT applied when available.
+
+    Backend deployments commonly use either a service-role key, which bypasses
+    RLS, or an anon key, which needs the user's JWT for RLS-protected tables.
+    Applying the JWT here keeps both configurations returning the same rows.
+    """
+    return get_supabase_with_token(getattr(user, "access_token", None))
+
+
+def get_supabase_with_token(token: Optional[str]) -> Client:
+    """Return a Supabase client scoped to a caller JWT when provided."""
+    if not token:
+        return get_supabase()
+
+    url = settings.SUPABASE_URL
+    key = settings.SUPABASE_KEY
+    if not url or not key:
+        raise RuntimeError("Supabase not configured. Set SUPABASE_URL and SUPABASE_KEY in .env")
+    sb = create_client(url, key)
+    apply_supabase_auth(sb, token)
+    return sb
+
+
+def apply_supabase_auth(sb: Client, token: Optional[str]) -> None:
+    """Apply a caller JWT to Supabase PostgREST when the client supports it."""
+    if token:
+        postgrest = getattr(sb, "postgrest", None)
+        auth_method = getattr(postgrest, "auth", None)
+        if callable(auth_method):
+            auth_method(token)
+
+
+def get_or_create_user_from_supabase(
+    user_id: str,
+    email: str,
+    user_metadata: Optional[dict] = None,
+    access_token: Optional[str] = None,
+) -> UserData:
     """
     Get or create a user from Supabase JWT token data.
     This replaces the in-memory users_db with Supabase database.
@@ -62,7 +101,7 @@ def get_or_create_user_from_supabase(user_id: str, email: str, user_metadata: Op
     """
     # Check if user profile exists in Supabase
     try:
-        sb = get_supabase()
+        sb = get_supabase_with_token(access_token)
         response = sb.table("user_profiles").select("*").eq("id", user_id).execute()
         
         if response.data and len(response.data) > 0:
@@ -84,6 +123,7 @@ def get_or_create_user_from_supabase(user_id: str, email: str, user_metadata: Op
                 last_name=user_metadata.get("last_name", "") if user_metadata else "",
                 spaces=space_names,
                 organization=organization,
+                access_token=access_token,
             )
         else:
             # User doesn't exist, create profile
@@ -115,6 +155,7 @@ def get_or_create_user_from_supabase(user_id: str, email: str, user_metadata: Op
                 last_name=user_metadata.get("last_name", "") if user_metadata else "",
                 spaces=["personal"],
                 organization=None,
+                access_token=access_token,
             )
     except Exception as e:
         print(f"Error getting/creating user from Supabase: {e}")
@@ -129,27 +170,45 @@ def get_accessible_spaces(user: UserData) -> List[str]:
         - Personal spaces: "<email>/<space_name>"
         - Org spaces: "<org_id>/<space_name>" (can later be swapped to org name)
     """
-    try:
-        sb = get_supabase()
-        # Personal spaces owned by the user
-        owned_resp = sb.table("spaces").select("name").eq("owner_id", user.user_id).execute()
-        personal = [f"{user.username}/{row['name']}" for row in owned_resp.data] if owned_resp.data else []
+    spaces = PUBLIC_SPACES.copy()
 
-        # Org membership -> fetch spaces for each org_id
-        org_spaces: List[str] = []
+    # Keep profile-derived spaces as a fallback. These are raw names from the
+    # spaces table, while API-facing identifiers include the owner email.
+    for space_name in user.spaces:
+        if "/" in space_name:
+            spaces.append(space_name)
+        else:
+            spaces.append(f"{user.username}/{space_name}")
+
+    try:
+        sb = get_supabase_for_user(user)
+    except Exception as e:
+        print(f"get_accessible_spaces client error: {e}", flush=True)
+        return list(dict.fromkeys(spaces))
+
+    try:
+        owned_resp = sb.table("spaces").select("name").eq("owner_id", user.user_id).execute()
+        if owned_resp.data:
+            spaces.extend(f"{user.username}/{row['name']}" for row in owned_resp.data)
+    except Exception as e:
+        print(f"get_accessible_spaces owned spaces error: {e}", flush=True)
+
+    try:
         membership_resp = sb.table("members").select("org_id").eq("user_id", user.user_id).execute()
         org_ids = [m["org_id"] for m in membership_resp.data] if membership_resp.data else []
-        if org_ids:
-            # For simplicity assume org_ids small; fetch spaces per org
-            for oid in org_ids:
-                s_resp = sb.table("spaces").select("name").eq("org_id", oid).execute()
-                if s_resp.data:
-                    org_spaces.extend([f"{oid}/{row['name']}" for row in s_resp.data])
-
-        return list(dict.fromkeys(PUBLIC_SPACES + personal + org_spaces))  # preserve order, de-dup
     except Exception as e:
-        print(f"get_accessible_spaces error: {e}")
-        return PUBLIC_SPACES.copy()
+        print(f"get_accessible_spaces memberships error: {e}", flush=True)
+        org_ids = []
+
+    for oid in org_ids:
+        try:
+            s_resp = sb.table("spaces").select("name").eq("org_id", oid).execute()
+            if s_resp.data:
+                spaces.extend(f"{oid}/{row['name']}" for row in s_resp.data)
+        except Exception as e:
+            print(f"get_accessible_spaces org spaces error for {oid}: {e}", flush=True)
+
+    return list(dict.fromkeys(spaces))  # preserve order, de-dup
 
 
 def create_user_space(user: UserData, name: str) -> str:
@@ -161,7 +220,7 @@ def create_user_space(user: UserData, name: str) -> str:
     if any(token in name for token in ("..", "/", "\\")):
         raise ValueError("Invalid space name")
     try:
-        sb = get_supabase()
+        sb = get_supabase_for_user(user)
         # Insert space row (id auto-generated). Avoid duplicates.
         existing = sb.table("spaces").select("name").eq("owner_id", user.user_id).eq("name", name).execute()
         if not (existing.data and len(existing.data) > 0):
@@ -180,5 +239,3 @@ def create_user_space(user: UserData, name: str) -> str:
         return f"{user.username}/{name}"
     except Exception as e:
         raise ValueError(f"Failed to create space: {e}")
-
-

@@ -369,10 +369,10 @@ def get_title_for_chat(last_user_msg):
         if oc is None:
             raise RuntimeError("OPENAI_API_KEY not configured")
         response = oc.responses.create(
-            model="gpt-4.1-nano",
+            model="gpt-5.4-nano",
             instructions="Given this user's request, give the Chat a title that will be shown in the list of chats. Return a string of max 5 words. Don't return any additional content, just the title.",
             input=[{"role": "user", "content": last_user_msg[:200]}],
-            # reasoning={"effort": "low"},
+            reasoning={"effort": "none"},
         )
         raw_title = response.output_text
         title = normalize_title(raw_title, last_user_msg)
@@ -395,10 +395,10 @@ Return 'fast_model' if the user's request is rather simple or a general knowledg
         if oc is None:
             return False
         response = oc.responses.create(
-            model="gpt-4.1-mini",
+            model="gpt-5.4-nano",
             instructions=instruction,
             input=[{"role": "user", "content": f"User request:\n{last_user_msg}"}],
-            # reasoning={"effort": "low"},
+            reasoning={"effort": "none"},
         )
         # print("response:", response.output_text)
         if "fast_model" in response.output_text.strip().lower():
@@ -537,7 +537,13 @@ async def chat_agentic_stream(
     req: AgenticChatRequest,
     user: UserData = Depends(get_current_user),
 ):
-    if req.space not in get_accessible_spaces(user):
+    accessible_spaces = get_accessible_spaces(user)
+    if req.space not in accessible_spaces:
+        print(
+            f"chat_agentic_stream forbidden: requested_space={req.space!r} "
+            f"user={user.username!r} accessible_spaces={accessible_spaces!r}",
+            flush=True,
+        )
         raise HTTPException(403, detail="Space not accessible")
 
     openai_messages: list[dict[str, Any]] = []

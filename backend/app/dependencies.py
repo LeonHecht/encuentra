@@ -32,7 +32,7 @@ def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(securit
         # verified JWT. Private spaces still require get_accessible_spaces to
         # reach Supabase.
         try:
-            return get_or_create_user_from_supabase(user_id, email, user_metadata)
+            return get_or_create_user_from_supabase(user_id, email, user_metadata, access_token=token)
         except Exception as e:
             print(f"User profile lookup failed; using JWT-only user context: {e}")
             return UserData(
@@ -40,6 +40,7 @@ def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(securit
                 username=email,
                 first_name=user_metadata.get("first_name", "") if user_metadata else "",
                 last_name=user_metadata.get("last_name", "") if user_metadata else "",
+                access_token=token,
             )
         
     except HTTPException:
