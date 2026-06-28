@@ -205,6 +205,101 @@ def test_get_accessible_spaces(auth_env):
     assert "supreme_court" in spaces
 
 
+def test_get_accessible_spaces_applies_user_jwt(auth_env, monkeypatch):
+    user = auth.UserData(
+        user_id=str(uuid.uuid4()),
+        username="alice@example.com",
+        access_token="caller-token",
+    )
+    mock_client = MagicMock()
+    owned_resp = MagicMock()
+    owned_resp.data = [{"name": "personal"}]
+    members_resp = MagicMock()
+    members_resp.data = []
+
+    spaces_table = MagicMock()
+    members_table = MagicMock()
+    spaces_table.select.return_value.eq.return_value.execute.return_value = owned_resp
+    members_table.select.return_value.eq.return_value.execute.return_value = members_resp
+
+    def table_side_effect(name):
+        if name == "spaces":
+            return spaces_table
+        if name == "members":
+            return members_table
+        return MagicMock()
+
+    mock_client.table.side_effect = table_side_effect
+    monkeypatch.setattr(settings, "SUPABASE_URL", "https://example.supabase.co")
+    monkeypatch.setattr(settings, "SUPABASE_KEY", "test-key")
+    monkeypatch.setattr(auth, "create_client", lambda url, key: mock_client)
+
+    spaces = auth.get_accessible_spaces(user)
+
+    mock_client.postgrest.auth.assert_called_once_with("caller-token")
+    assert "alice@example.com/personal" in spaces
+
+
+def test_get_accessible_spaces_keeps_personal_when_memberships_fail(auth_env, monkeypatch):
+    user = auth.UserData(
+        user_id=str(uuid.uuid4()),
+        username="alice@example.com",
+        spaces=["personal"],
+    )
+    mock_client = MagicMock()
+    owned_resp = MagicMock()
+    owned_resp.data = [{"name": "work"}]
+
+    spaces_table = MagicMock()
+    members_table = MagicMock()
+    spaces_table.select.return_value.eq.return_value.execute.return_value = owned_resp
+    members_table.select.return_value.eq.return_value.execute.side_effect = RuntimeError("members unavailable")
+
+    def table_side_effect(name):
+        if name == "spaces":
+            return spaces_table
+        if name == "members":
+            return members_table
+        return MagicMock()
+
+    mock_client.table.side_effect = table_side_effect
+    monkeypatch.setattr(auth, "get_supabase", lambda: mock_client)
+
+    spaces = auth.get_accessible_spaces(user)
+
+    assert spaces == ["supreme_court", "alice@example.com/personal", "alice@example.com/work"]
+
+
+def test_get_or_create_user_preserves_access_token(auth_env, monkeypatch):
+    user_id = str(uuid.uuid4())
+    email = "existing@example.com"
+    mock_supabase = MagicMock()
+    profile_resp = MagicMock()
+    profile_resp.data = [{"id": user_id, "display_name": "Existing User"}]
+    spaces_resp = MagicMock()
+    spaces_resp.data = [{"name": "personal"}]
+    org_resp = MagicMock()
+    org_resp.data = []
+
+    mock_supabase.table.return_value.select.return_value.eq.return_value.execute.side_effect = [
+        profile_resp,
+        spaces_resp,
+        org_resp,
+    ]
+    monkeypatch.setattr(settings, "SUPABASE_URL", "https://example.supabase.co")
+    monkeypatch.setattr(settings, "SUPABASE_KEY", "test-key")
+    monkeypatch.setattr(auth, "create_client", lambda url, key: mock_supabase)
+
+    user = auth.get_or_create_user_from_supabase(
+        user_id,
+        email,
+        access_token="caller-token",
+    )
+
+    mock_supabase.postgrest.auth.assert_called_once_with("caller-token")
+    assert user.access_token == "caller-token"
+
+
 def test_create_user_space_valid(auth_env, monkeypatch):
     """Test creating a valid user space."""
     user = auth.UserData(user_id=str(uuid.uuid4()), username="alice", spaces=["personal"])

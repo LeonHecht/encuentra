@@ -538,7 +538,7 @@ export default function Chat() {
 
   async function handleSubmit() {
     const trimmed = text.trim();
-    if (!trimmed || status !== "ready") return;
+    if (!trimmed || status !== "ready" || !space) return;
     const {
       data: { session },
     } = await supabase.auth.getSession();
@@ -721,7 +721,7 @@ export default function Chat() {
               <PromptInputFooter>
                 <PromptInputTools />
                 <PromptInputSubmit
-                  disabled={status === "submitted" || (status !== "streaming" && !text)}
+                  disabled={status === "submitted" || (status !== "streaming" && (!text || !space))}
                   status={status}
                   onClick={(e) => {
                     if (status === "streaming") {
