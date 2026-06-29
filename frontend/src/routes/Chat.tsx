@@ -725,7 +725,10 @@ export default function Chat() {
                   className="py-3 pl-4 pr-14 leading-6"
                 />
               </PromptInputBody>
-              <PromptInputFooter className="absolute right-2 top-1/2 w-auto -translate-y-1/2 px-0 py-0">
+              <PromptInputFooter
+                className={`absolute right-2 w-auto px-0 py-0 ${isInputExpanded ? "bottom-2" : "top-1/2 -translate-y-1/2"
+                  }`}
+              >
                 <PromptInputTools />
                 <PromptInputSubmit
                   className="rounded-full"
