@@ -92,7 +92,7 @@ it('loads spaces, performs search, and renders results', async () => {
   render(<MemoryRouter><Search /></MemoryRouter>);
 
   // After mount, spaces should be loaded and first selected
-  await waitFor(() => expect(screen.getByText('Space: public')).toBeInTheDocument());
+  await waitFor(() => expect(screen.getByText('Space: supreme_court')).toBeInTheDocument());
 
   // Type a query and trigger search
   const input = screen.getByPlaceholderText(/Ingresa las palabras/i);
@@ -109,15 +109,15 @@ it('loads spaces, performs search, and renders results', async () => {
   expect(screen.queryByText(/Copiar cita/i)).not.toBeInTheDocument();
   expect(screen.queryByText(/Temas relacionados/i)).not.toBeInTheDocument();
 
-  // Ensure useApi called for spaces and search
-  expect(apiMock).toHaveBeenCalledWith('user/spaces');
+  // Search starts with the public space without blocking on a spaces request.
+  expect(apiMock).not.toHaveBeenCalledWith('user/spaces');
   expect(apiMock).toHaveBeenCalledWith('search', expect.stringMatching(/\?q=contrato/));
 });
 
 it('expands and collapses legal metadata details', async () => {
   render(<MemoryRouter><Search /></MemoryRouter>);
 
-  await waitFor(() => expect(screen.getByText('Space: public')).toBeInTheDocument());
+  await waitFor(() => expect(screen.getByText('Space: supreme_court')).toBeInTheDocument());
   await userEvent.type(screen.getByPlaceholderText(/Ingresa las palabras/i), 'libertad');
   await userEvent.click(screen.getByRole('button', { name: 'Buscar' }));
 
