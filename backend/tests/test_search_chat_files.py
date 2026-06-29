@@ -126,6 +126,34 @@ def test_chat_search_cases_passes_exact_year_filter(monkeypatch):
     assert captured["year"] == 1995
 
 
+def test_chat_fetch_passages_citations_keep_download_metadata(monkeypatch):
+    def fake_fetch_passages(**kwargs):
+        return [
+            {
+                "doc_id": "case-1",
+                "passage": "Fragmento relevante",
+                "title": "Sentencia relevante",
+                "download_url": "https://example.com/case-1.pdf",
+            }
+        ]
+
+    monkeypatch.setattr(chat_ep.search_engine, "fetch_passages", fake_fetch_passages)
+
+    ctx = chat_ep.AgentContext(space="supreme_court", last_user_msg="consulta")
+    chat_ep.run_tool(ctx, "fetch_passages", {"ids": ["case-1"]})
+
+    citations = chat_ep.dedupe_citations(ctx.citations)
+
+    assert citations == [
+        {
+            "doc_id": "case-1",
+            "snippet": "Fragmento relevante",
+            "title": "Sentencia relevante",
+            "download_url": "https://example.com/case-1.pdf",
+        }
+    ]
+
+
 def test_stream_rejects_inaccessible_space(monkeypatch):
     monkeypatch.setattr(chat_ep, "get_accessible_spaces", lambda user: ["personal"])
 
