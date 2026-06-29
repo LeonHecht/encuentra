@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import { useSpaces } from "@/hooks/useSpaces";
 import {
   Select,
@@ -11,6 +12,10 @@ import {
 } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
 
+function isPublicSpace(space) {
+  return typeof space === "string" && !space.includes("/");
+}
+
 export default function SpaceSelect({
   value,
   onChange,
@@ -21,7 +26,22 @@ export default function SpaceSelect({
 }) {
   const { spaces, loading, label, user } = useSpaces();
 
-  if (loading) return <div className="text-sm text-muted-foreground">Cargando espacios…</div>;
+  const canonicalPublicSpace = spaces.find(isPublicSpace);
+
+  useEffect(() => {
+    if (
+      !loading &&
+      canonicalPublicSpace &&
+      value &&
+      isPublicSpace(value) &&
+      value !== canonicalPublicSpace &&
+      typeof onChange === "function"
+    ) {
+      onChange(canonicalPublicSpace);
+    }
+  }, [canonicalPublicSpace, loading, onChange, value]);
+
+  if (loading && !spaces.length) return <div className="text-sm text-muted-foreground">Cargando espacios…</div>;
   if (!spaces.length) return <div className="text-sm text-muted-foreground">Sin espacios disponibles</div>;
 
   // ----- split into groups -----

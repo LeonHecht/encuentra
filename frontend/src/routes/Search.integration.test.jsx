@@ -70,13 +70,13 @@ describe('<Search />', () => {
   it('ignores blank queries (no search, no empty-state)', async () => {
     renderSearch()
 
-    // waits for spaces load + heading
+    // The route renders immediately with the public space.
     await waitFor(() => expect(screen.getByText(/Buscar casos/i)).toBeInTheDocument())
-    expect(apiMock).toHaveBeenCalledWith('user/spaces')
+    expect(apiMock).not.toHaveBeenCalledWith('user/spaces')
 
     const btn = screen.getByRole('button', { name: /buscar/i })
     await userEvent.click(btn)
-    // Only the initial call to user/spaces should exist so far
+    // No search should run for an empty query.
     expect(apiMock.mock.calls.filter(c => c[0] === 'search').length).toBe(0)
     // Searched flag stayed false, so no empty-state
     expect(screen.queryByText(/No se encontraron resultados\./)).not.toBeInTheDocument()
