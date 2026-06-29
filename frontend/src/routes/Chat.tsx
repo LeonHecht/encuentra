@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import SpaceSelect from "@/components/SpaceSelect";
 import ChatSidebar from "@/components/ChatSidebar";
-import { apiFetch } from "@/hooks/useApi";
+import { DEFAULT_SPACE } from "@/hooks/useSpaces";
 import { supabase } from "@/lib/supabaseClient";
 import { SidebarProvider, SidebarTrigger, SidebarInset } from "@/components/ui/sidebar"
 import { useChatContextDocuments } from "@/context/ChatContextDocuments";
@@ -63,8 +63,7 @@ export default function Chat() {
 
   const [title, setTitle] = useState<string>("");
   const [messages, setMessages] = useState<ChatMsg[]>([]);
-  const [spaces, setSpaces] = useState<string[]>([]);
-  const [space, setSpace] = useState<string>("");
+  const [space, setSpace] = useState<string>(DEFAULT_SPACE);
   const [agentState, setAgentState] = useState<string | null>(null);
   const [text, setText] = useState<string>("");
   const [isInputExpanded, setIsInputExpanded] = useState(false);
@@ -81,21 +80,6 @@ export default function Chat() {
   function returnToSearch() {
     navigate("/search", { state: { restoreSearchState: true } });
   }
-
-  useEffect(() => {
-    let alive = true;
-    apiFetch("user/spaces")
-      .then((d) => {
-        if (!alive) return;
-        const s: string[] = d.spaces || [];
-        setSpaces(s);
-        if (s.length > 0) setSpace((prev) => prev || s[0]);
-      })
-      .catch((e) => console.error("Failed to fetch spaces", e));
-    return () => {
-      alive = false;
-    };
-  }, []);
 
   function scrollMessageToTop(messageId: string) {
     const container = scrollContainerRef.current;
