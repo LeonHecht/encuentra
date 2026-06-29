@@ -67,6 +67,7 @@ export default function Chat() {
   const [space, setSpace] = useState<string>("");
   const [agentState, setAgentState] = useState<string | null>(null);
   const [text, setText] = useState<string>("");
+  const [isInputExpanded, setIsInputExpanded] = useState(false);
   const [status, setStatus] = useState<"ready" | "submitted" | "streaming">(
     "ready"
   );
@@ -322,12 +323,28 @@ export default function Chat() {
     return Math.max(1, Math.ceil((endedAt - startedAt) / 1000));
   }
 
+  const updateInputExpanded = useCallback((textarea: HTMLTextAreaElement) => {
+    requestAnimationFrame(() => {
+      const styles = window.getComputedStyle(textarea);
+      const lineHeight = Number.parseFloat(styles.lineHeight) || 24;
+      const paddingY =
+        (Number.parseFloat(styles.paddingTop) || 0) +
+        (Number.parseFloat(styles.paddingBottom) || 0);
+      const singleLineHeight = lineHeight + paddingY;
+
+      setIsInputExpanded(
+        textarea.value.length > 0 && textarea.scrollHeight > singleLineHeight + 2
+      );
+    });
+  }, []);
+
   async function handleSubmitNonStream(trimmed: string, accessToken: string) {
     const chatId = await ensureChat(trimmed.slice(0, 60));
 
     // user message (UI + persist)
     pushMessage("user", trimmed);
     setText("");
+    setIsInputExpanded(false);
     await supabase.from("chat_messages").insert({
       chat_id: chatId, role: "user", content: trimmed, meta: { context_documents: contextDocuments },
     });
@@ -367,6 +384,7 @@ export default function Chat() {
     // user message (UI + persist)
     pushMessage("user", trimmed);
     setText("");
+    setIsInputExpanded(false);
     await supabase.from("chat_messages").insert({
       chat_id: chatId, role: "user", content: trimmed, meta: { context_documents: contextDocuments },
     });
@@ -708,19 +726,25 @@ export default function Chat() {
             )}
             <PromptInput
               onSubmit={handleSubmit}
-              className="bg-white rounded-2xl shadow-lg transition-colors hover:bg-gray-50"
+              className={`bg-white shadow-lg transition-[background-color,border-radius] hover:bg-gray-50 ${isInputExpanded ? "rounded-[28px]" : "rounded-full"
+                }`}
             >
               <PromptInputBody>
                 <PromptInputTextarea
                   ref={textareaRef}
                   value={text}
-                  onChange={(e) => setText(e.target.value)}
-                  placeholder="Pregunta lo que quieras a tu asistente legal…"
+                  onChange={(e) => {
+                    setText(e.target.value);
+                    updateInputExpanded(e.currentTarget);
+                  }}
+                  placeholder="Pregunta lo que quieras"
+                  className="py-3 pl-4 pr-14 leading-6"
                 />
               </PromptInputBody>
-              <PromptInputFooter>
+              <PromptInputFooter className="absolute right-2 top-1/2 w-auto -translate-y-1/2 px-0 py-0">
                 <PromptInputTools />
                 <PromptInputSubmit
+                  className="rounded-full"
                   disabled={status === "submitted" || (status !== "streaming" && (!text || !space))}
                   status={status}
                   onClick={(e) => {
@@ -732,6 +756,9 @@ export default function Chat() {
                 />
               </PromptInputFooter>
             </PromptInput>
+            <p className="mt-2 text-center text-xs text-gray-500">
+              Encuentra Chat puede cometer errores. Se debe comprobar la información importante.
+            </p>
           </div>
         </div>
       </SidebarInset>
