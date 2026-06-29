@@ -49,7 +49,7 @@ type ChatMsg = {
   id: string;
   role: "user" | "assistant";
   text: string;
-  citations?: Array<{ doc_id: string; snippet?: string }>;
+  citations?: Array<{ doc_id: string; snippet?: string; title?: string; download_url?: string }>;
   reasoning?: string[];
   reasoningStreaming?: boolean;
   reasoningStartedAt?: number;

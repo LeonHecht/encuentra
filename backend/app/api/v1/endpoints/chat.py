@@ -34,7 +34,7 @@ class AgentContext:
     last_user_msg: str = ""
     context_documents: List[Dict[str, Any]] = field(default_factory=list)
     title: Optional[str] = None
-    citations: List[Dict[str, str]] = field(default_factory=list)
+    citations: List[Dict[str, Any]] = field(default_factory=list)
     trace: List[Dict[str, Any]] = field(default_factory=list)
     iteration_count: int = 0
     final_answer: str = ""
@@ -46,6 +46,7 @@ class ContextDocument(BaseModel):
     id: str
     title: str | None = None
     case_year: int | None = None
+    download_url: str | None = None
 
 
 class AgenticChatRequest(BaseModel):
@@ -310,6 +311,7 @@ def resolve_context_documents(req: AgenticChatRequest, max_documents: int = 10) 
             "id": doc_id,
             "title": selected.title or doc.get("title") or doc_id,
             "case_year": selected.case_year or doc.get("case_year"),
+            "download_url": selected.download_url or doc.get("download_url"),
         })
     return resolved
 
@@ -455,7 +457,12 @@ def run_tool(ctx: AgentContext, tool_name, tool_args) -> str:
                 did = (p or {}).get("doc_id") or (p or {}).get("id")
                 if did:
                     snip = (p or {}).get("passage") or (p or {}).get("snippet") or ""
-                    ctx.citations.append({"doc_id": did, "snippet": snip[:400]})
+                    ctx.citations.append({
+                        "doc_id": did,
+                        "snippet": snip[:400],
+                        "title": (p or {}).get("title"),
+                        "download_url": (p or {}).get("download_url"),
+                    })
         except Exception as _e:
             pass
         push_trace({"type":"tool_result","step":ctx.iteration_count,"tool":"fetch_passages","result_count":len(result)})
@@ -472,7 +479,12 @@ def run_tool(ctx: AgentContext, tool_name, tool_args) -> str:
                 did = result.get("id") or doc_id
                 txt = (result.get("text") or "")
                 if did and txt:
-                    ctx.citations.append({"doc_id": did, "snippet": txt[:240]})
+                    ctx.citations.append({
+                        "doc_id": did,
+                        "snippet": txt[:240],
+                        "title": result.get("title"),
+                        "download_url": result.get("download_url"),
+                    })
         except Exception as _e:
             pass
         push_trace({"type":"tool_result","step":ctx.iteration_count,"tool":"fetch_document","result_count":1 if result else 0})
@@ -488,8 +500,17 @@ def dedupe_citations(cites: list[dict]) -> list[dict]:
     seen = set(); out=[]
     for c in cites:
         did = c.get("doc_id")
-        if did and did not in seen:
-            out.append(c); seen.add(did)
+        if not did:
+            continue
+        if did not in seen:
+            out.append({k: v for k, v in c.items() if v is not None})
+            seen.add(did)
+            continue
+        existing = next((item for item in out if item.get("doc_id") == did), None)
+        if existing:
+            for key in ("title", "download_url", "snippet"):
+                if not existing.get(key) and c.get(key):
+                    existing[key] = c[key]
     return out
 
 def tool_progress_message(tool_name: str, tool_args: dict[str, Any]) -> str | None:
