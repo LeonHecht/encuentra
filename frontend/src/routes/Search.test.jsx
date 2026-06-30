@@ -21,6 +21,7 @@ const apiMock = vi.fn(async (path) => {
   }
   if (path === 'search') {
     return {
+      query_log_id: 'query-log-1',
       results: [
         {
           id: '1',
@@ -64,6 +65,9 @@ const apiMock = vi.fn(async (path) => {
   if (path === 'case-metadata') {
     return { status: 'pending', metadata: null };
   }
+  if (path === 'search-feedback') {
+    return { id: 'feedback-1', saved: true };
+  }
   return {};
 });
 vi.mock('@/hooks/useApi', () => ({
@@ -82,6 +86,8 @@ vi.mock('@/lib/supabaseClient', () => ({
 beforeEach(() => {
   apiMock.mockClear();
   getSessionMock.mockReset();
+  window.localStorage.clear();
+  window.sessionStorage.clear();
   getSessionMock.mockResolvedValue({
     data: { session: { access_token: 'test-token' } },
     error: null,

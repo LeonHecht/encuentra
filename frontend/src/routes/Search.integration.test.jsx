@@ -27,13 +27,18 @@ const apiMock = vi.fn(async (path, qs = '') => {
     const q = new URLSearchParams(qs.replace(/^\?/, '')).get('q') || ''
     if (q === 'derecho') {
       return {
+        query_log_id: 'query-log-1',
         results: [
           { id: 'doc-1', title: 'Sentencia 123/2020', score: 0.87, snippet: 'derecho constitucional' },
         ],
       }
     }
-    if (q === 'nohits') return { results: [] }
-    return { results: [] }
+    if (q === 'nohits') return { query_log_id: 'query-log-empty', results: [] }
+    return { query_log_id: 'query-log-empty', results: [] }
+  }
+
+  if (path === 'search-feedback') {
+    return { id: 'feedback-1', saved: true }
   }
   return {}
 })
@@ -61,6 +66,7 @@ describe('<Search />', () => {
     apiMock.mockClear()
     getSessionMock.mockReset()
     window.sessionStorage.clear()
+    window.localStorage.clear()
     getSessionMock.mockResolvedValue({
       data: { session: { access_token: 'test-token' } },
       error: null,
@@ -94,6 +100,38 @@ describe('<Search />', () => {
     await screen.findByText(/Sentencia 123\/2020/)
     expect(screen.getByText(/derecho constitucional/)).toBeInTheDocument()
     expect(screen.queryByText(/Score:/)).not.toBeInTheDocument()
+  })
+
+  it('saves feedback for a displayed search result', async () => {
+    renderSearch()
+    await screen.findByText(/Buscar casos/)
+
+    await userEvent.type(screen.getByPlaceholderText(/Ingresa las palabras/i), 'derecho')
+    await userEvent.click(screen.getByRole('button', { name: /buscar/i }))
+    await screen.findByText(/Sentencia 123\/2020/)
+
+    await userEvent.click(screen.getByRole('button', { name: /Marcar resultado como útil/i }))
+
+    await waitFor(() => {
+      expect(apiMock).toHaveBeenCalledWith(
+        'search-feedback',
+        '',
+        expect.objectContaining({
+          method: 'POST',
+          body: expect.stringContaining('"query_log_id":"query-log-1"'),
+        })
+      )
+    })
+    const feedbackCall = apiMock.mock.calls.find((call) => call[0] === 'search-feedback')
+    const payload = JSON.parse(feedbackCall[2].body)
+    expect(payload).toMatchObject({
+      query_text: 'derecho',
+      space: 'supreme_court',
+      doc_id: 'doc-1',
+      rank: 1,
+      score: 0.87,
+      feedback: 'positive',
+    })
   })
 
   it('shows empty state when query has zero hits', async () => {

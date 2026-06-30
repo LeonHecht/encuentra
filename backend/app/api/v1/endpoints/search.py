@@ -2,12 +2,19 @@ import traceback
 
 from fastapi import APIRouter, Query, HTTPException, Depends, BackgroundTasks
 # from typing import List, Dict
-from ..schemas import CaseMetadataResponse, SearchResponse, SearchResult
+from ..schemas import (
+    CaseMetadataResponse,
+    SearchFeedbackRequest,
+    SearchFeedbackResponse,
+    SearchResponse,
+    SearchResult,
+)
 from backend.app.services.search import search_engine
 from backend.app.dependencies import get_current_user
 from backend.app.services.auth import get_accessible_spaces, UserData
 from backend.app.core.config import settings
 from backend.app.services import case_metadata
+from backend.app.services import search_feedback
 
 
 router = APIRouter()
@@ -72,7 +79,56 @@ def search(
         print(f"Search failed for query '{q}' in space '{space}': {exc}", flush=True)
         traceback.print_exc()
         raise HTTPException(503, detail="Search backend unavailable") from exc
-    return SearchResponse(query_log_id=1, results=results)
+
+    query_log_id = None
+    try:
+        query_log_id = search_feedback.log_search_query(
+            user=user,
+            query_text=q,
+            space=space,
+            top_k=top_k,
+            year_filter=year_filter,
+            result_count=len(results),
+            metadata={"metadata_store_available": metadata_store_available},
+        )
+    except Exception as exc:
+        print(f"Search logging failed for query '{q}' in space '{space}': {exc}", flush=True)
+
+    return SearchResponse(query_log_id=query_log_id, results=results)
+
+
+@router.post("/search-feedback", response_model=SearchFeedbackResponse)
+def submit_search_feedback(
+    req: SearchFeedbackRequest,
+    user: UserData = Depends(get_current_user),
+):
+    query_text = req.query_text.strip()
+    if not query_text:
+        raise HTTPException(400, detail="query_text must not be empty")
+    if req.space not in get_accessible_spaces(user):
+        raise HTTPException(403, detail="Space not accessible")
+    try:
+        row = search_feedback.save_search_result_feedback(
+            user=user,
+            query_log_id=req.query_log_id,
+            query_text=query_text,
+            space=req.space,
+            top_k=req.top_k,
+            year_filter=req.year_filter,
+            doc_id=req.doc_id,
+            rank=req.rank,
+            score=req.score,
+            title=req.title,
+            snippet=req.snippet,
+            feedback=req.feedback,
+            reason=req.reason,
+            metadata=req.metadata,
+        )
+    except Exception as exc:
+        print(f"Search feedback save failed for {req.space}/{req.doc_id}: {exc}", flush=True)
+        raise HTTPException(503, detail="Feedback could not be saved") from exc
+
+    return SearchFeedbackResponse(id=row.get("id") if row else None, saved=True)
 
 
 @router.get("/cases/{space}/{doc_id}/metadata", response_model=CaseMetadataResponse)
