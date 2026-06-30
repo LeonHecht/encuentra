@@ -12,7 +12,9 @@ from openai import OpenAI
 from backend.app.core.config import settings
 from backend.app.services.search import search_engine
 from backend.app.dependencies import get_current_user
-from backend.app.services.auth import get_accessible_spaces, UserData
+from backend.app.services.auth import UserData, get_accessible_spaces, get_supabase_for_user
+from backend.app.services import chat_feedback
+from backend.app.api.v1.schemas import ChatFeedbackRequest, ChatFeedbackResponse
 
 from dataclasses import dataclass, field
 from typing import Any, List, Dict, Optional
@@ -59,6 +61,67 @@ class AgenticChatRequest(BaseModel):
 router = APIRouter()
 # Lazy OpenAI client initialization to avoid startup failures when OPENAI_API_KEY is missing
 client: OpenAI | None = None
+
+
+def _verify_assistant_message_access(
+    *,
+    user: UserData,
+    chat_id: str,
+    assistant_message_id: str,
+) -> None:
+    sb = get_supabase_for_user(user)
+    chat_resp = (
+        sb.table("chats")
+        .select("id")
+        .eq("id", chat_id)
+        .eq("user_id", user.user_id)
+        .execute()
+    )
+    if not chat_resp.data:
+        raise HTTPException(404, detail="Chat not found")
+
+    msg_resp = (
+        sb.table("chat_messages")
+        .select("id")
+        .eq("id", assistant_message_id)
+        .eq("chat_id", chat_id)
+        .eq("role", "assistant")
+        .execute()
+    )
+    if not msg_resp.data:
+        raise HTTPException(404, detail="Assistant message not found")
+
+
+@router.post("/chat-feedback", response_model=ChatFeedbackResponse)
+def submit_chat_feedback(
+    req: ChatFeedbackRequest,
+    user: UserData = Depends(get_current_user),
+):
+    _verify_assistant_message_access(
+        user=user,
+        chat_id=req.chat_id,
+        assistant_message_id=req.assistant_message_id,
+    )
+    try:
+        row = chat_feedback.save_chat_message_feedback(
+            user=user,
+            chat_id=req.chat_id,
+            assistant_message_id=req.assistant_message_id,
+            space=req.space,
+            previous_user_message=req.previous_user_message,
+            previous_messages=[m.model_dump() for m in req.previous_messages],
+            assistant_response=req.assistant_response,
+            citations=req.citations,
+            feedback=req.feedback,
+            feedback_text=req.feedback_text,
+            metadata=req.metadata,
+        )
+    except Exception as exc:
+        print(f"Chat feedback save failed for {req.chat_id}/{req.assistant_message_id}: {exc}", flush=True)
+        raise HTTPException(503, detail="Feedback could not be saved") from exc
+
+    return ChatFeedbackResponse(id=row.get("id") if row else None, saved=True)
+
 
 def get_openai_client() -> OpenAI | None:
     """Return a cached OpenAI client if OPENAI_API_KEY is configured, else None."""

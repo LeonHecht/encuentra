@@ -7,7 +7,8 @@ import { supabase } from "@/lib/supabaseClient";
 import { SidebarProvider, SidebarTrigger, SidebarInset } from "@/components/ui/sidebar"
 import { useChatContextDocuments } from "@/context/ChatContextDocuments";
 import { Button } from "@/components/ui/button";
-import { ArrowLeft, FileText, X } from "lucide-react";
+import { ArrowLeft, Check, FileText, ThumbsDown, ThumbsUp, X } from "lucide-react";
+import { apiFetch } from "@/hooks/useApi";
 
 // AI Elements
 import {
@@ -56,6 +57,42 @@ type ChatMsg = {
   reasoningEndedAt?: number;
 };
 
+type ChatFeedbackState = {
+  feedback: "positive" | "negative";
+  feedbackText?: string;
+};
+
+const CHAT_FEEDBACK_KEY = "encuentra.chatFeedback";
+
+function loadStoredChatFeedback(): Record<string, ChatFeedbackState> {
+  try {
+    const raw = window.localStorage.getItem(CHAT_FEEDBACK_KEY);
+    return raw ? JSON.parse(raw) : {};
+  } catch {
+    return {};
+  }
+}
+
+function saveStoredChatFeedback(messageId: string, value: ChatFeedbackState) {
+  try {
+    const stored = loadStoredChatFeedback();
+    stored[messageId] = value;
+    window.localStorage.setItem(CHAT_FEEDBACK_KEY, JSON.stringify(stored));
+  } catch {
+    // Feedback remains saved server-side if browser storage is unavailable.
+  }
+}
+
+function removeStoredChatFeedback(messageId: string) {
+  try {
+    const stored = loadStoredChatFeedback();
+    delete stored[messageId];
+    window.localStorage.setItem(CHAT_FEEDBACK_KEY, JSON.stringify(stored));
+  } catch {
+    // Ignore browser storage failures.
+  }
+}
+
 export default function Chat() {
   const navigate = useNavigate();
   // Avoid double slashes when VITE_API_BASE ends with '/'
@@ -71,6 +108,13 @@ export default function Chat() {
     "ready"
   );
   const [currentChatId, setCurrentChatId] = useState<string | null>(null);
+  const [feedbackByMessageId, setFeedbackByMessageId] = useState<Record<string, ChatFeedbackState>>({});
+  const [feedbackTextByMessageId, setFeedbackTextByMessageId] = useState<Record<string, string>>({});
+  const [activeNegativeFeedbackId, setActiveNegativeFeedbackId] = useState<string | null>(null);
+  const [feedbackToast, setFeedbackToast] = useState<{ messageId: string | null; msg: string }>({
+    messageId: null,
+    msg: "",
+  });
   const { documents: contextDocuments, removeDocument, clearDocuments } = useChatContextDocuments();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
@@ -116,15 +160,39 @@ export default function Chat() {
     return () => window.clearTimeout(id);
   }, [messages]);
 
+  useEffect(() => {
+    const stored = loadStoredChatFeedback();
+    const nextFeedback: Record<string, ChatFeedbackState> = {};
+    const nextText: Record<string, string> = {};
+
+    for (const message of messages) {
+      const value = stored[message.id];
+      if (message.role === "assistant" && value) {
+        nextFeedback[message.id] = value;
+        if (value.feedbackText) nextText[message.id] = value.feedbackText;
+      }
+    }
+
+    setFeedbackByMessageId((prev) => ({ ...nextFeedback, ...prev }));
+    setFeedbackTextByMessageId((prev) => ({ ...nextText, ...prev }));
+  }, [messages]);
+
   function pushMessage(
     role: "user" | "assistant",
     text: string,
-    citations: ChatMsg["citations"] = []
+    citations: ChatMsg["citations"] = [],
+    id?: string
   ) {
     setMessages((prev) => [
       ...prev,
-      { id: `${Date.now()}-${prev.length}`, role, text, citations },
+      { id: id || `${Date.now()}-${prev.length}`, role, text, citations },
     ]);
+  }
+
+  function replaceMessageId(oldId: string, newId: string) {
+    setMessages((prev) =>
+      prev.map((m) => (m.id === oldId ? { ...m, id: newId } : m))
+    );
   }
 
   const loadChatMessages = useCallback(async (chatId: string) => {
@@ -250,6 +318,108 @@ export default function Chat() {
     );
   }
 
+  function showFeedbackToast(messageId: string, msg: string) {
+    setFeedbackToast({ messageId, msg });
+    window.setTimeout(() => setFeedbackToast({ messageId: null, msg: "" }), 2000);
+  }
+
+  function feedbackPayloadForMessage(
+    message: ChatMsg,
+    index: number,
+    feedback: "positive" | "negative",
+    feedbackText?: string
+  ) {
+    const previousMessages = messages.slice(0, index).map((item) => ({
+      role: item.role,
+      content: item.text,
+    }));
+    const previousUserMessage = [...previousMessages]
+      .reverse()
+      .find((item) => item.role === "user")?.content;
+
+    return {
+      chat_id: currentChatId,
+      assistant_message_id: message.id,
+      space,
+      previous_user_message: previousUserMessage || null,
+      previous_messages: previousMessages,
+      assistant_response: message.text,
+      citations: message.citations || [],
+      feedback,
+      feedback_text: feedbackText?.trim() || null,
+      metadata: {
+        chat_title: title || null,
+        reasoning: message.reasoning || [],
+        context_documents: contextDocuments,
+      },
+    };
+  }
+
+  async function saveChatFeedback(
+    message: ChatMsg,
+    index: number,
+    feedback: "positive" | "negative",
+    feedbackText?: string
+  ) {
+    if (!currentChatId || !message.text.trim()) return;
+
+    await apiFetch("chat-feedback", "", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(feedbackPayloadForMessage(message, index, feedback, feedbackText)),
+    });
+
+    const value = { feedback, feedbackText: feedbackText?.trim() || undefined };
+    setFeedbackByMessageId((prev) => ({ ...prev, [message.id]: value }));
+    saveStoredChatFeedback(message.id, value);
+  }
+
+  async function handleAssistantFeedback(
+    message: ChatMsg,
+    index: number,
+    feedback: "positive" | "negative"
+  ) {
+    if (feedbackByMessageId[message.id]) return;
+
+    const value = { feedback };
+    setFeedbackByMessageId((prev) => ({ ...prev, [message.id]: value }));
+    saveStoredChatFeedback(message.id, value);
+    if (feedback === "positive") {
+      showFeedbackToast(message.id, "Gracias por su feedback!");
+    }
+    if (feedback === "negative") {
+      setActiveNegativeFeedbackId(message.id);
+    }
+
+    try {
+      await saveChatFeedback(message, index, feedback);
+    } catch (err) {
+      console.error("chat feedback error", err);
+      setFeedbackByMessageId((prev) => {
+        const next = { ...prev };
+        delete next[message.id];
+        return next;
+      });
+      removeStoredChatFeedback(message.id);
+    }
+  }
+
+  async function updateNegativeFeedbackText(message: ChatMsg, index: number, nextFeedbackText?: string) {
+    const existing = feedbackByMessageId[message.id];
+    if (existing?.feedback !== "negative" && activeNegativeFeedbackId !== message.id) return;
+    const feedbackText = nextFeedbackText ?? feedbackTextByMessageId[message.id] ?? "";
+    setActiveNegativeFeedbackId((current) => (current === message.id ? null : current));
+    showFeedbackToast(message.id, "Gracias, vamos a mejorar!");
+    try {
+      await saveChatFeedback(message, index, "negative", feedbackText);
+    } catch (err) {
+      console.error("chat feedback text error", err);
+      setActiveNegativeFeedbackId(message.id);
+      setFeedbackToast({ messageId: message.id, msg: "No se pudo guardar el feedback." });
+      window.setTimeout(() => setFeedbackToast({ messageId: null, msg: "" }), 2000);
+    }
+  }
+
   function addReasoningLine(assistantId: string, line: string) {
     const trimmed = line.trim();
     if (!trimmed) return;
@@ -356,10 +526,10 @@ export default function Chat() {
       await supabase.from("chats").update({ agent_state: data.agent_state }).eq("id", chatId);
     }
 
-    await supabase.from("chat_messages").insert({
+    const { data: assistantRow } = await supabase.from("chat_messages").insert({
       chat_id: chatId, role: "assistant", content: data.answer || "", meta: { citations: data.citations || [] },
-    });
-    pushMessage("assistant", data.answer || "", data.citations || []);
+    }).select("id").single();
+    pushMessage("assistant", data.answer || "", data.citations || [], assistantRow?.id);
   }
 
   async function handleSubmitStream(trimmed: string, accessToken: string) {
@@ -464,13 +634,16 @@ export default function Chat() {
             await supabase.from("chats").update({ agent_state: newState }).eq("id", chatId);
           }
 
-          await supabase.from("chat_messages").insert({
+          const { data: assistantRow } = await supabase.from("chat_messages").insert({
             chat_id: chatId, role: "assistant", content: answer, meta: { citations, reasoning: reasoningBuf },
-          });
+          }).select("id").single();
+          if (assistantRow?.id) {
+            replaceMessageId(assistantId, assistantRow.id);
+          }
 
           setStatus("ready");
           // Streaming finished; allow Reasoning to auto-close for this message
-          setMessageReasoningStreaming(assistantId, false);
+          setMessageReasoningStreaming(assistantRow?.id || assistantId, false);
           break;
         }
 
@@ -626,7 +799,7 @@ export default function Chat() {
                       </div>
                     </div>
                   ) : (
-                    messages.map((m) => (
+                    messages.map((m, index) => (
                       <Message key={m.id} from={m.role} data-message-id={m.id}>
                         <MessageContent>
                           {m.role === "assistant" && m.reasoning && m.reasoning.length > 0 && (
@@ -656,6 +829,76 @@ export default function Chat() {
                             />
                           ) : (
                             <Response>{m.text}</Response>
+                          )}
+                          {m.role === "assistant" && m.text.trim() && !m.reasoningStreaming && currentChatId && (
+                            <div className="relative mt-3 flex flex-col items-start gap-2">
+                              <div className="flex items-center gap-2">
+                                <button
+                                  type="button"
+                                  onClick={() => handleAssistantFeedback(m, index, "positive")}
+                                  disabled={Boolean(feedbackByMessageId[m.id])}
+                                  aria-label="Marcar respuesta como útil"
+                                  className={`rounded-full p-1.5 transition ${
+                                    feedbackByMessageId[m.id]?.feedback === "positive"
+                                      ? "bg-green-200 text-green-800"
+                                      : "text-gray-600 hover:bg-green-100"
+                                  }`}
+                                >
+                                  <ThumbsUp className="h-4 w-4" aria-hidden="true" />
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleAssistantFeedback(m, index, "negative")}
+                                  disabled={Boolean(feedbackByMessageId[m.id])}
+                                  aria-label="Marcar respuesta como no útil"
+                                  className={`rounded-full p-1.5 transition ${
+                                    feedbackByMessageId[m.id]?.feedback === "negative"
+                                      ? "bg-red-200 text-red-800"
+                                      : "text-gray-600 hover:bg-red-100"
+                                  }`}
+                                >
+                                  <ThumbsDown className="h-4 w-4" aria-hidden="true" />
+                                </button>
+                                {feedbackToast.messageId === m.id && (
+                                  <div
+                                    className="
+                                      bg-white border border-gray-300
+                                      text-gray-800
+                                      px-3 py-1
+                                      rounded-md shadow-lg
+                                      animate-fade-in-out z-10
+                                    "
+                                  >
+                                    {feedbackToast.msg}
+                                  </div>
+                                )}
+                              </div>
+                              {activeNegativeFeedbackId === m.id && (
+                                <div className="flex w-full max-w-sm items-center gap-2">
+                                  <input
+                                    type="text"
+                                    value={feedbackTextByMessageId[m.id] || ""}
+                                    onChange={(event) =>
+                                      setFeedbackTextByMessageId((prev) => ({
+                                        ...prev,
+                                        [m.id]: event.target.value,
+                                      }))
+                                    }
+                                    placeholder="¿Qué debería mejorar?"
+                                    className="h-9 min-w-0 flex-1 rounded-md border border-gray-200 bg-white px-3 text-sm text-gray-900 outline-none transition focus:border-gray-400"
+                                  />
+                                  <button
+                                    type="button"
+                                    onMouseDown={(event) => event.preventDefault()}
+                                    onClick={() => updateNegativeFeedbackText(m, index, feedbackTextByMessageId[m.id] || "")}
+                                    aria-label="Guardar feedback"
+                                    className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-gray-200 bg-white text-gray-700 transition hover:bg-gray-50"
+                                  >
+                                    <Check className="h-4 w-4" aria-hidden="true" />
+                                  </button>
+                                </div>
+                              )}
+                            </div>
                           )}
                         </MessageContent>
                       </Message>

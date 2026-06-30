@@ -29,12 +29,17 @@ vi.mock('@/lib/supabaseClient', () => {
         }
         return Promise.resolve({ data: { agent_state: null }, error: null })
       },
-      insert() { // chats.insert(...).select().single(); chat_messages.insert(...)
+      insert() { // chats.insert(...).select().single(); chat_messages.insert(...).select().single()
         if (table === 'chats') {
           return { select() { return this }, single: this.single }
         }
-        // chat_messages insert returns a resolved object
-        return Promise.resolve({ data: null, error: null })
+        return {
+          select() {
+            return {
+              single: () => Promise.resolve({ data: { id: `msg-${Date.now()}` }, error: null }),
+            }
+          },
+        }
       },
       update() { return Promise.resolve({ data: null, error: null }) },
       delete() { return Promise.resolve({ data: null, error: null }) },
@@ -107,6 +112,7 @@ function sseStream(frames: { event: string, data: any }[]) {
 
 // Reset fetch mock between tests
 beforeEach(() => {
+  window.localStorage.clear()
   vi.stubGlobal('fetch', vi.fn((url: string, init?: any) => {
     if (url.includes('/v1/chat/agentic/stream')) {
       return Promise.resolve({

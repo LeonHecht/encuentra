@@ -18,6 +18,47 @@ import {
 import { Search as SearchIcon } from "lucide-react";
 
 const SEARCH_STATE_KEY = "encuentra.searchState";
+const SEARCH_FEEDBACK_KEY = "encuentra.searchFeedback";
+
+function searchFeedbackKey(context, docId) {
+  if (!context?.queryText || !context?.space || !docId) return null;
+  return [context.space, context.queryText.trim(), docId]
+    .map((part) => encodeURIComponent(String(part)))
+    .join("|");
+}
+
+function loadStoredFeedback() {
+  try {
+    const raw = window.localStorage.getItem(SEARCH_FEEDBACK_KEY);
+    return raw ? JSON.parse(raw) : {};
+  } catch {
+    return {};
+  }
+}
+
+function saveStoredFeedback(context, docId, positive) {
+  const key = searchFeedbackKey(context, docId);
+  if (!key) return;
+  try {
+    const stored = loadStoredFeedback();
+    stored[key] = positive;
+    window.localStorage.setItem(SEARCH_FEEDBACK_KEY, JSON.stringify(stored));
+  } catch {
+    // Feedback is still saved server-side even if browser storage is unavailable.
+  }
+}
+
+function storedFeedbackForResults(context, results) {
+  if (!context || !Array.isArray(results) || results.length === 0) return {};
+  const stored = loadStoredFeedback();
+  return results.reduce((acc, result) => {
+    const key = searchFeedbackKey(context, result.id);
+    if (key && typeof stored[key] === "boolean") {
+      acc[result.id] = stored[key];
+    }
+    return acc;
+  }, {});
+}
 
 function defaultSearchState() {
   return {
@@ -25,6 +66,7 @@ function defaultSearchState() {
     space: DEFAULT_SPACE,
     topK: "10",
     year: "",
+    searchContext: null,
     results: [],
     searched: false,
   };
@@ -42,6 +84,7 @@ function loadSearchStateForRestore(shouldRestore) {
       ...defaultSearchState(),
       ...parsed,
       results: Array.isArray(parsed.results) ? parsed.results : [],
+      searchContext: parsed.searchContext || null,
       searched: Boolean(parsed.searched),
       topK: parsed.topK ? String(parsed.topK) : "10",
     };
@@ -69,17 +112,22 @@ export default function Search() {
   const [space, setSpace]   = useState(initialSearchState.space);
   const [topK, setTopK] = useState(initialSearchState.topK);
   const [year, setYear] = useState(initialSearchState.year);
+  const [searchContext, setSearchContext] = useState(initialSearchState.searchContext);
   const [results, setResults] = useState(initialSearchState.results);
   const [searched, setSearched] = useState(initialSearchState.searched);
 
   useEffect(() => {
     if (!space) return;
-    saveSearchState({ q, space, topK, year, results, searched });
-  }, [q, space, topK, year, results, searched]);
+    saveSearchState({ q, space, topK, year, searchContext, results, searched });
+  }, [q, space, topK, year, searchContext, results, searched]);
 
   const [loading, setLoading] = useState(false);
   const [feedbackById, setFeedbackById] = useState({});
   const [toast, setToast] = useState({ docId: null, msg: "" });
+
+  useEffect(() => {
+    setFeedbackById(storedFeedbackForResults(searchContext, results));
+  }, [searchContext, results]);
 
   const onSearch = async () => {
     const {
@@ -100,7 +148,17 @@ export default function Search() {
       });
       if (year.trim()) params.set("year", year.trim());
       const res = await apiFetch("search", `?${params.toString()}`);
-      setResults(res.results || []);
+      const nextResults = res.results || [];
+      const nextSearchContext = {
+        queryLogId: res.query_log_id || null,
+        queryText: q,
+        space,
+        topK: Number(topK),
+        yearFilter: year.trim() ? Number(year.trim()) : null,
+      };
+      setResults(nextResults);
+      setSearchContext(nextSearchContext);
+      setFeedbackById(storedFeedbackForResults(nextSearchContext, nextResults));
     } catch (err) {
       console.error("Search error:", err);
       alert("Search failed. Check console.");
@@ -109,11 +167,52 @@ export default function Search() {
     }
   };
 
-  const sendFeedback = async (docId, positive) => {
-    // stub: you'll wire this up to /feedback later
+  const sendFeedback = async (result, rank, positive) => {
+    const docId = result.id;
+    const context = searchContext || {
+      queryLogId: null,
+      queryText: q,
+      space,
+      topK: Number(topK),
+      yearFilter: year.trim() ? Number(year.trim()) : null,
+    };
+
     setFeedbackById((f) => ({ ...f, [docId]: positive }));
     setToast({ docId, msg: positive ? "Gracias por su feedback!" : "Gracias, vamos a mejorar!" });
-    setTimeout(() => setToast({ docId: null, msg: "" }), 2000);
+    try {
+      await apiFetch("search-feedback", "", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          query_log_id: context.queryLogId,
+          query_text: context.queryText,
+          space: context.space,
+          top_k: context.topK,
+          year_filter: context.yearFilter,
+          doc_id: docId,
+          rank,
+          score: result.score ?? null,
+          title: result.title ?? null,
+          snippet: result.snippet ?? null,
+          feedback: positive ? "positive" : "negative",
+          metadata: {
+            case_year: result.case_year ?? null,
+            metadata_status: result.metadata_status ?? null,
+          },
+        }),
+      });
+      saveStoredFeedback(context, docId, positive);
+    } catch (err) {
+      console.error("Feedback error:", err);
+      setFeedbackById((f) => {
+        const next = { ...f };
+        delete next[docId];
+        return next;
+      });
+      setToast({ docId, msg: "No se pudo guardar el feedback." });
+    } finally {
+      setTimeout(() => setToast({ docId: null, msg: "" }), 2000);
+    }
   };
 
   return (
@@ -187,7 +286,7 @@ export default function Search() {
           )}
 
           {/* ---------- 2) actual hits ---------- */}
-          {results.map((res) => {
+          {results.map((res, index) => {
             const fb = feedbackById[res.id];
             const isToast = toast.docId === res.id;
 
@@ -200,7 +299,7 @@ export default function Search() {
                   result={res}
                   space={space}
                   feedback={fb}
-                  onFeedback={sendFeedback}
+                  onFeedback={(_docId, positive) => sendFeedback(res, index + 1, positive)}
                   onAddToChat={addDocument}
                   onOpenChat={() => navigate("/chat")}
                   isInChatContext={isSelected(space, res.id)}
