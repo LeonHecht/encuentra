@@ -7,6 +7,7 @@ import { supabase } from "@/lib/supabaseClient";
 import { SidebarProvider, SidebarTrigger, SidebarInset } from "@/components/ui/sidebar"
 import { useChatContextDocuments } from "@/context/ChatContextDocuments";
 import { Button } from "@/components/ui/button";
+import ExpandingPromptInput from "@/components/ExpandingPromptInput";
 import { ArrowLeft, Check, FileText, ThumbsDown, ThumbsUp, X } from "lucide-react";
 import { apiFetch } from "@/hooks/useApi";
 
@@ -37,15 +38,6 @@ import {
   InlineCitationSource,
   InlineCitationQuote,
 } from "@/components/ai-elements/inline-citation";
-import {
-  PromptInput,
-  PromptInputBody,
-  PromptInputTextarea,
-  PromptInputFooter,
-  PromptInputTools,
-  PromptInputSubmit,
-} from "@/components/ai-elements/prompt-input";
-
 type ChatMsg = {
   id: string;
   role: "user" | "assistant";
@@ -103,7 +95,6 @@ export default function Chat() {
   const [space, setSpace] = useState<string>(DEFAULT_SPACE);
   const [agentState, setAgentState] = useState<string | null>(null);
   const [text, setText] = useState<string>("");
-  const [isInputExpanded, setIsInputExpanded] = useState(false);
   const [status, setStatus] = useState<"ready" | "submitted" | "streaming">(
     "ready"
   );
@@ -116,7 +107,6 @@ export default function Chat() {
     msg: "",
   });
   const { documents: contextDocuments, removeDocument, clearDocuments } = useChatContextDocuments();
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const abortRef = useRef<AbortController | null>(null);
   const useStreaming: boolean = true;
@@ -477,28 +467,12 @@ export default function Chat() {
     return Math.max(1, Math.ceil((endedAt - startedAt) / 1000));
   }
 
-  const updateInputExpanded = useCallback((textarea: HTMLTextAreaElement) => {
-    requestAnimationFrame(() => {
-      const styles = window.getComputedStyle(textarea);
-      const lineHeight = Number.parseFloat(styles.lineHeight) || 24;
-      const paddingY =
-        (Number.parseFloat(styles.paddingTop) || 0) +
-        (Number.parseFloat(styles.paddingBottom) || 0);
-      const singleLineHeight = lineHeight + paddingY;
-
-      setIsInputExpanded(
-        textarea.value.length > 0 && textarea.scrollHeight > singleLineHeight + 2
-      );
-    });
-  }, []);
-
   async function handleSubmitNonStream(trimmed: string, accessToken: string) {
     const chatId = await ensureChat(trimmed.slice(0, 60));
 
     // user message (UI + persist)
     pushMessage("user", trimmed);
     setText("");
-    setIsInputExpanded(false);
     await supabase.from("chat_messages").insert({
       chat_id: chatId, role: "user", content: trimmed, meta: { context_documents: contextDocuments },
     });
@@ -538,7 +512,6 @@ export default function Chat() {
     // user message (UI + persist)
     pushMessage("user", trimmed);
     setText("");
-    setIsInputExpanded(false);
     await supabase.from("chat_messages").insert({
       chat_id: chatId, role: "user", content: trimmed, meta: { context_documents: contextDocuments },
     });
@@ -951,41 +924,15 @@ export default function Chat() {
                 </div>
               </div>
             )}
-            <PromptInput
+            <ExpandingPromptInput
+              value={text}
+              onChange={setText}
               onSubmit={handleSubmit}
-              className={`bg-white shadow-lg transition-[background-color,border-radius] hover:bg-gray-50 ${isInputExpanded ? "rounded-[28px]" : "rounded-full"
-                }`}
-            >
-              <PromptInputBody>
-                <PromptInputTextarea
-                  ref={textareaRef}
-                  value={text}
-                  onChange={(e) => {
-                    setText(e.target.value);
-                    updateInputExpanded(e.currentTarget);
-                  }}
-                  placeholder="Pregunta lo que quieras"
-                  className="py-3 pl-4 pr-14 leading-6"
-                />
-              </PromptInputBody>
-              <PromptInputFooter
-                className={`absolute right-2 w-auto px-0 py-0 ${isInputExpanded ? "bottom-2" : "top-1/2 -translate-y-1/2"
-                  }`}
-              >
-                <PromptInputTools />
-                <PromptInputSubmit
-                  className="rounded-full"
-                  disabled={status === "submitted" || (status !== "streaming" && (!text || !space))}
-                  status={status}
-                  onClick={(e) => {
-                    if (status === "streaming") {
-                      e.preventDefault();
-                      stopStreaming();
-                    }
-                  }}
-                />
-              </PromptInputFooter>
-            </PromptInput>
+              onStop={stopStreaming}
+              status={status}
+              disabled={status === "submitted" || (status !== "streaming" && (!text || !space))}
+              placeholder="Pregunta lo que quieras"
+            />
             <p className="mt-2 text-center text-xs text-gray-500">
               Encuentra Chat puede cometer errores. Se debe comprobar la información importante.
             </p>

@@ -1,16 +1,19 @@
-// src/components/BackgroundVideo.jsx
+import backgroundVideo from '../assets/8731388-hd_1920_1080_25fps.mp4';
+
 export default function BackgroundVideo() {
   return (
-    <video
-      className="absolute inset-0 w-full h-full object-cover hidden md:block -z-10 opacity-50"
-      autoPlay        // reproducción automática
-      loop            // se repite
-      muted           // sin sonido
-      playsInline     // evita pantalla completa forzada en iOS
-    >
-      <source src="/assets/encuentra_landing(2).mp4" type="video/mp4" />
-      {/* fallback para navegadores viejos */}
-      Tu navegador no soporta vídeo en HTML5.
-    </video>
+    <div className="pointer-events-none absolute inset-0 z-0 overflow-hidden">
+      <video
+        className="h-full w-full object-cover opacity-80 grayscale"
+        autoPlay
+        loop
+        muted
+        playsInline
+        aria-hidden="true"
+      >
+        <source src={backgroundVideo} type="video/mp4" />
+      </video>
+      <div className="absolute inset-0 bg-white/60" />
+    </div>
   );
 }
