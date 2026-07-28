@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 const PLACEHOLDER_QUESTIONS = [
   "¿Qué criterios hay sobre diligencia en contratos?",
@@ -20,7 +20,12 @@ const PLACEHOLDER_QUESTIONS = [
  *  - onSend(message: string): optional callback when message sent
  *  - placeholder: optional placeholder text
  */
-export default function ChatBox({ onSend, placeholder }) {
+export default function ChatBox({
+  onSend,
+  placeholder,
+  disabled = false,
+  animatePlaceholder = true,
+}) {
   const [value, setValue] = useState('');
   const [currentIndex, setCurrentIndex] = useState(0);
   const [isAnimating, setIsAnimating] = useState(false);
@@ -28,6 +33,8 @@ export default function ChatBox({ onSend, placeholder }) {
 
   // Rotate placeholders every 2 seconds
   useEffect(() => {
+    if (!animatePlaceholder || placeholder) return undefined;
+
     const interval = setInterval(() => {
       setIsAnimating(true);
       setTimeout(() => {
@@ -37,21 +44,27 @@ export default function ChatBox({ onSend, placeholder }) {
     }, 2000);
 
     return () => clearInterval(interval);
-  }, []);
+  }, [animatePlaceholder, placeholder]);
 
   // Auto resize height (optional nicer UX)
   useEffect(() => {
     const el = textareaRef.current;
     if (!el) return;
     el.style.height = 'auto';
-    el.style.height = `${el.scrollHeight}px`;
+    el.style.height = `${Math.min(el.scrollHeight, 160)}px`;
+    el.style.overflowY = el.scrollHeight > 160 ? 'auto' : 'hidden';
   }, [value]);
 
   const handleSend = () => {
+    if (disabled) return;
     const trimmed = value.trim();
     if (!trimmed) return;
     onSend?.(trimmed);
     setValue('');
+  };
+
+  const handleChange = (e) => {
+    setValue(e.target.value);
   };
 
   const handleKeyDown = (e) => {
@@ -63,27 +76,30 @@ export default function ChatBox({ onSend, placeholder }) {
 
   return (
     <div className="w-full max-w-2xl mx-auto">
-      <div className="flex items-center gap-3 bg-neutral-50 rounded-2xl px-3 py-2 hover:bg-neutral-100 focus:bg-neutral-100 rounded-xl transition-colors">
-        <div className="flex-1 relative overflow-hidden flex items-center">
+      <div className={`flex items-end gap-3 rounded-full bg-neutral-50 px-3 py-2 transition-colors hover:bg-neutral-100 focus-within:bg-neutral-100 ${disabled ? 'opacity-75' : ''}`}>
+        <div className="relative flex min-h-8 flex-1 items-center overflow-hidden">
           <textarea
             ref={textareaRef}
             value={value}
-            onChange={(e) => setValue(e.target.value)}
+            onChange={handleChange}
             onKeyDown={handleKeyDown}
+            placeholder={placeholder || ''}
             rows={1}
-            className="w-full resize-none bg-transparent focus:outline-none text-sm text-neutral-800 leading-relaxed relative z-10 caret-neutral-800"
-            style={{ 
+            disabled={disabled}
+            className="relative px-1 z-10 max-h-40 w-full resize-none bg-transparent text-sm leading-relaxed text-neutral-800 caret-neutral-800 focus:outline-none"
+            style={{
               color: value ? 'inherit' : 'transparent',
             }}
           />
           {!value && (
-            <div className="absolute inset-0 pointer-events-none overflow-hidden flex items-center">
-              <div 
-                className={`text-sm text-neutral-400 leading-relaxed transition-transform duration-500 ${
-                  isAnimating ? 'translate-y-full opacity-0' : 'translate-y-0 opacity-100'
-                }`}
+            <div className="px-1 pointer-events-none absolute inset-0 flex items-center overflow-hidden">
+              <div
+                className={`text-sm leading-relaxed text-neutral-400 transition-transform duration-500 ${animatePlaceholder && isAnimating
+                  ? 'translate-y-full opacity-0'
+                  : 'translate-y-0 opacity-100'
+                  }`}
               >
-                {PLACEHOLDER_QUESTIONS[currentIndex]}
+                {placeholder || PLACEHOLDER_QUESTIONS[currentIndex]}
               </div>
             </div>
           )}
@@ -92,8 +108,8 @@ export default function ChatBox({ onSend, placeholder }) {
           type="button"
           onClick={handleSend}
           aria-label="Send message"
-          className="shrink-0 h-8 w-8 rounded-full bg-neutral-900 hover:bg-black transition flex items-center justify-center disabled:opacity-40"
-          disabled={!value.trim()}
+          className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-neutral-900 text-white transition hover:bg-black disabled:opacity-40"
+          disabled={disabled || !value.trim()}
         >
           <svg
             xmlns="http://www.w3.org/2000/svg"
@@ -103,7 +119,7 @@ export default function ChatBox({ onSend, placeholder }) {
             strokeWidth="2"
             strokeLinecap="round"
             strokeLinejoin="round"
-            className="h-4 w-4 text-white"
+            className="h-4 w-4"
           >
             <path d="M12 19V5" />
             <path d="M5 12l7-7 7 7" />

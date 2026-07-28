@@ -105,9 +105,13 @@ export default function Search() {
   const navigate = useNavigate();
   const location = useLocation();
   const { addDocument, isSelected } = useChatContextDocuments();
-  const [initialSearchState] = useState(() =>
-    loadSearchStateForRestore(Boolean(location.state?.restoreSearchState))
-  );
+  const [initialSearchState] = useState(() => {
+    const restored = loadSearchStateForRestore(Boolean(location.state?.restoreSearchState));
+    return {
+      ...restored,
+      q: typeof location.state?.landingQuery === "string" ? location.state.landingQuery : restored.q,
+    };
+  });
   const [q, setQ]           = useState(initialSearchState.q);
   const [space, setSpace]   = useState(initialSearchState.space);
   const [topK, setTopK] = useState(initialSearchState.topK);
