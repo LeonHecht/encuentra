@@ -50,9 +50,10 @@ export default function ChatBox({
   useEffect(() => {
     const el = textareaRef.current;
     if (!el) return;
-    el.style.height = 'auto';
-    el.style.height = `${Math.min(el.scrollHeight, 160)}px`;
-    el.style.overflowY = el.scrollHeight > 160 ? 'auto' : 'hidden';
+    el.style.height = '0px';
+    const contentHeight = el.scrollHeight;
+    el.style.height = `${Math.min(contentHeight + 2, 160)}px`;
+    el.style.overflowY = contentHeight > 158 ? 'auto' : 'hidden';
   }, [value]);
 
   const handleSend = () => {
@@ -76,25 +77,29 @@ export default function ChatBox({
 
   return (
     <div className="w-full max-w-2xl mx-auto">
-      <div className={`flex items-end gap-3 rounded-full bg-neutral-50 px-3 py-2 transition-colors hover:bg-neutral-100 focus-within:bg-neutral-100 ${disabled ? 'opacity-75' : ''}`}>
-        <div className="relative flex min-h-8 flex-1 items-center overflow-hidden">
+      <div className="flex items-end gap-3 rounded-full bg-white px-3 py-2 transition-colors">
+        <div className="relative flex min-h-12 flex-1 items-center sm:min-h-8">
           <textarea
             ref={textareaRef}
             value={value}
             onChange={handleChange}
             onKeyDown={handleKeyDown}
-            placeholder={placeholder || ''}
+            placeholder=""
+            aria-label={placeholder || PLACEHOLDER_QUESTIONS[currentIndex]}
             rows={1}
             disabled={disabled}
-            className="relative px-1 z-10 max-h-40 w-full resize-none bg-transparent text-sm leading-relaxed text-neutral-800 caret-neutral-800 focus:outline-none"
+            className="relative z-10 block min-h-12 max-h-40 w-full resize-none bg-transparent px-1 py-1 text-sm leading-5 text-neutral-800 caret-neutral-800 focus:outline-none sm:min-h-8"
             style={{
               color: value ? 'inherit' : 'transparent',
             }}
           />
           {!value && (
-            <div className="px-1 pointer-events-none absolute inset-0 flex items-center overflow-hidden">
+            <div
+              aria-hidden="true"
+              className="pointer-events-none absolute inset-0 flex items-center overflow-hidden px-1"
+            >
               <div
-                className={`text-sm leading-relaxed text-neutral-400 transition-transform duration-500 ${animatePlaceholder && isAnimating
+                className={`max-h-10 overflow-hidden text-sm leading-5 text-neutral-400 transition-transform duration-500 ${animatePlaceholder && isAnimating
                   ? 'translate-y-full opacity-0'
                   : 'translate-y-0 opacity-100'
                   }`}

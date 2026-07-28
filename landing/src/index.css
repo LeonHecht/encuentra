@@ -5,9 +5,24 @@
 @tailwind utilities;
 
 @layer base {
+  html,
+  body,
+  #root {
+    max-width: 100%;
+    overflow-x: hidden;
+  }
+
   body {
     font-family: 'Manrope', ui-sans-serif, system-ui, sans-serif;
     font-optical-sizing: auto;
+  }
+}
+
+@supports (overflow: clip) {
+  html,
+  body,
+  #root {
+    overflow-x: clip;
   }
 }
 
@@ -48,6 +63,13 @@
   opacity: 1;
   filter: blur(0);
   transform: translate3d(0, 0, 0) scale(1);
+}
+
+@media (max-width: 639px) {
+  .scroll-reveal--left,
+  .scroll-reveal--right {
+    transform: translate3d(0, 48px, 0);
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
