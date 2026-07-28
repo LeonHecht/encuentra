@@ -25,6 +25,10 @@ export const handlers = [
           },
         ]
       : []
-    return HttpResponse.json({ results })
+    return HttpResponse.json({ query_log_id: 'query-log-msw', results })
+  }),
+
+  http.post(`${API}/v1/search-feedback`, () => {
+    return HttpResponse.json({ id: 'feedback-msw', saved: true })
   }),
 ]

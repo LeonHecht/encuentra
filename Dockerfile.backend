@@ -5,7 +5,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PORT=8000
 
-# OS deps: certs for HTTPS (AOSS), curl for debugging/health if needed
+# OS deps: certs for HTTPS OpenSearch/S3 endpoints, curl for debugging/health if needed
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     curl \
@@ -16,14 +16,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 WORKDIR /app
 
 # Install Python deps first for better layer caching
-COPY backend/requirements.txt backend/requirements.txt
+COPY backend/requirements-prod.txt backend/requirements-prod.txt
 RUN pip install --no-cache-dir --upgrade pip \
-    && pip install --no-cache-dir -r backend/requirements.txt
+    && pip install --no-cache-dir -r backend/requirements-prod.txt
 
-# Copy only backend code and minimal runtime data
+# Copy only backend code. Staging/prod indexing reads source documents from S3.
 COPY backend/ backend/
-# Include the static corpus so the default BM25/local modes can run
-COPY data/static_corpus/ data/static_corpus/
 
 # Create and use a non-root user
 RUN useradd -m appuser && chown -R appuser:appuser /app
@@ -32,5 +30,5 @@ USER appuser
 # Expose FastAPI port (default)
 EXPOSE 8000
 
-# Start Uvicorn, honoring PORT if provided by the platform (e.g., App Runner)
+# Start Uvicorn, honoring PORT if provided by the platform
 CMD ["sh", "-c", "uvicorn backend.app.main:app --host 0.0.0.0 --port ${PORT:-8000} --access-log"]

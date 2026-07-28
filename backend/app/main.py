@@ -33,7 +33,8 @@ app.include_router(billing.router, prefix=f"/{settings.API_VERSION}")
 app.include_router(billing.router, prefix=f"/{settings.API_VERSION}")
 
 static_dir = Path(__file__).resolve().parent.parent.parent / "data" / "static_corpus" / "files"
-app.mount("/files", StaticFiles(directory=static_dir), name="files")
+if static_dir.exists():
+    app.mount("/files", StaticFiles(directory=static_dir), name="files")
 
 @app.get("/ping")
 def ping():
@@ -49,11 +50,14 @@ def on_startup():
     - Default (both false): always index the main corpus space and any upload spaces
       (preserves previous local dev behavior).
     """
+    if not settings.INDEX_ON_STARTUP:
+        print('[startup] INDEX_ON_STARTUP=false; skipping search indexing.')
+        return
+
     force = settings.FORCE_REINDEX_ON_STARTUP
     skip = settings.SKIP_REINDEX_ON_STARTUP
 
     def needs_index(space: str) -> bool:
-        return False
         if force:
             return True
         if skip:

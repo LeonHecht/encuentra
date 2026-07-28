@@ -1,16 +1,20 @@
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from fastapi.responses import StreamingResponse
 from typing import List, Dict, Any
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import Any
 import re
 import json
 import textwrap
 import os
+from types import SimpleNamespace
 from openai import OpenAI
 from backend.app.core.config import settings
 from backend.app.services.search import search_engine
 from backend.app.dependencies import get_current_user
+from backend.app.services.auth import UserData, get_accessible_spaces, get_supabase_for_user
+from backend.app.services import chat_feedback
+from backend.app.api.v1.schemas import ChatFeedbackRequest, ChatFeedbackResponse
 
 from dataclasses import dataclass, field
 from typing import Any, List, Dict, Optional
@@ -20,7 +24,7 @@ class AgentConfig:
     model: str
     system_prompt: str
     tools: list
-    max_iterations: int = 10
+    max_iterations: int = 20
     parallel_tool_calls: bool = False
     reasoning_effort: str = "medium"
     reasoning_summary: str = "detailed"
@@ -30,23 +34,94 @@ class AgentContext:
     space: str
     openai_messages: List[Dict[str, Any]] = field(default_factory=list)
     last_user_msg: str = ""
+    context_documents: List[Dict[str, Any]] = field(default_factory=list)
     title: Optional[str] = None
-    citations: List[Dict[str, str]] = field(default_factory=list)
+    citations: List[Dict[str, Any]] = field(default_factory=list)
     trace: List[Dict[str, Any]] = field(default_factory=list)
     iteration_count: int = 0
     final_answer: str = ""
     keep_reasoning: bool = True
 
 
+class ContextDocument(BaseModel):
+    space: str
+    id: str
+    title: str | None = None
+    case_year: int | None = None
+    download_url: str | None = None
+
+
 class AgenticChatRequest(BaseModel):
     space: str
     messages: list[dict[str, Any]]   # role/content pairs
     state: str | None = None
+    context_documents: list[ContextDocument] = Field(default_factory=list)
 
 
 router = APIRouter()
 # Lazy OpenAI client initialization to avoid startup failures when OPENAI_API_KEY is missing
 client: OpenAI | None = None
+
+
+def _verify_assistant_message_access(
+    *,
+    user: UserData,
+    chat_id: str,
+    assistant_message_id: str,
+) -> None:
+    sb = get_supabase_for_user(user)
+    chat_resp = (
+        sb.table("chats")
+        .select("id")
+        .eq("id", chat_id)
+        .eq("user_id", user.user_id)
+        .execute()
+    )
+    if not chat_resp.data:
+        raise HTTPException(404, detail="Chat not found")
+
+    msg_resp = (
+        sb.table("chat_messages")
+        .select("id")
+        .eq("id", assistant_message_id)
+        .eq("chat_id", chat_id)
+        .eq("role", "assistant")
+        .execute()
+    )
+    if not msg_resp.data:
+        raise HTTPException(404, detail="Assistant message not found")
+
+
+@router.post("/chat-feedback", response_model=ChatFeedbackResponse)
+def submit_chat_feedback(
+    req: ChatFeedbackRequest,
+    user: UserData = Depends(get_current_user),
+):
+    _verify_assistant_message_access(
+        user=user,
+        chat_id=req.chat_id,
+        assistant_message_id=req.assistant_message_id,
+    )
+    try:
+        row = chat_feedback.save_chat_message_feedback(
+            user=user,
+            chat_id=req.chat_id,
+            assistant_message_id=req.assistant_message_id,
+            space=req.space,
+            previous_user_message=req.previous_user_message,
+            previous_messages=[m.model_dump() for m in req.previous_messages],
+            assistant_response=req.assistant_response,
+            citations=req.citations,
+            feedback=req.feedback,
+            feedback_text=req.feedback_text,
+            metadata=req.metadata,
+        )
+    except Exception as exc:
+        print(f"Chat feedback save failed for {req.chat_id}/{req.assistant_message_id}: {exc}", flush=True)
+        raise HTTPException(503, detail="Feedback could not be saved") from exc
+
+    return ChatFeedbackResponse(id=row.get("id") if row else None, saved=True)
+
 
 def get_openai_client() -> OpenAI | None:
     """Return a cached OpenAI client if OPENAI_API_KEY is configured, else None."""
@@ -98,7 +173,7 @@ When the user asks you to search in his/her documents, assume they refer to the 
 - ALWAYS PROVIDE YOUR ANSWER IN MARKDOWN!
 
 ## Quality & Safety
-- Be concise, concrete, and neutral. 
+- Be concise, concrete, and neutral.
 - Do not provide legal advice disclaimers unless explicitly requested.
 - Avoid definitive prescriptions (“debes”); maintain an informative tone.
 - If sourced information is insufficient or ambiguous, state this clearly and suggest a refined search.
@@ -143,8 +218,7 @@ tools = [
                 "filters": {
                     "type": "object",
                     "properties": {
-                        "year_from": { "type": "integer" },
-                        "year_to":   { "type": "integer" },
+                        "year": { "type": "integer" },
                         "court":     { "type": "string" },
                         "matter":    { "type": "string" }
                     },
@@ -242,8 +316,17 @@ def log_tool_call(step: int, name: str, args: dict, result: Any):
 def search_cases(query: str, space: str = "", filters: Dict[str, Any] = {}, top_k: int = 5) -> List[Dict[str, Any]]:
     """ query OpenSearch and return compact hits (IDs + short snippets + meta)
     """
-    # perform search; Filters will be implemented lateron (TODO)
-    hits = search_engine.search(query=query, top_k=top_k, space=space)
+    year = None
+    if isinstance(filters, dict):
+        raw_year = filters.get("year")
+        year_from = filters.get("year_from")
+        year_to = filters.get("year_to")
+        if raw_year is not None:
+            year = int(raw_year)
+        elif year_from is not None and year_to is not None and str(year_from) == str(year_to):
+            year = int(year_from)
+
+    hits = search_engine.search(query=query, top_k=top_k, space=space, year=year)
 
     # hits has [{"id", "title", "score", "snippet", "download_url"}]
     return hits
@@ -259,7 +342,7 @@ def fetch_passages(query: str, ids: List[str], space: str = "", per_id: int = 3,
                                                             per_id=per_id,
                                                             max_tokens=max_tokens)
         passages.extend(top_passages_for_id)
-    
+
     return passages
 
 def fetch_document(id: str, space: str = "", max_tokens: int = 2048) -> Dict[str, Any]:
@@ -269,6 +352,46 @@ def fetch_document(id: str, space: str = "", max_tokens: int = 2048) -> Dict[str
     elif doc.get("text") == "":
         print("[fetch_document] Document has empty text:", id)
     return doc if doc is not None else {}
+
+def resolve_context_documents(req: AgenticChatRequest, max_documents: int = 10) -> list[dict[str, Any]]:
+    """Validate selected chat-context documents against the active search index."""
+    resolved: list[dict[str, Any]] = []
+    seen: set[tuple[str, str]] = set()
+    for selected in req.context_documents[:max_documents]:
+        doc_space = selected.space or req.space
+        doc_id = selected.id
+        if doc_space != req.space:
+            raise HTTPException(400, detail="Context documents must belong to the selected chat space")
+        key = (doc_space, doc_id)
+        if key in seen:
+            continue
+        doc = search_engine.get_document_by_id(space=doc_space, doc_id=doc_id)
+        if doc is None:
+            raise HTTPException(400, detail=f"Context document '{doc_id}' was not found in the search index")
+        seen.add(key)
+        resolved.append({
+            "space": doc_space,
+            "id": doc_id,
+            "title": selected.title or doc.get("title") or doc_id,
+            "case_year": selected.case_year or doc.get("case_year"),
+            "download_url": selected.download_url or doc.get("download_url"),
+        })
+    return resolved
+
+def context_documents_message(context_documents: list[dict[str, Any]]) -> dict[str, str] | None:
+    if not context_documents:
+        return None
+    lines = [
+        "The user attached these indexed documents as chat context.",
+        "Prefer these documents when answering the next user request.",
+        "Before citing or relying on a document, call fetch_passages or fetch_document for its ID.",
+        "",
+        "Attached documents:",
+    ]
+    for doc in context_documents:
+        suffix = f" ({doc['case_year']})" if doc.get("case_year") else ""
+        lines.append(f"- {doc['id']}: {doc.get('title') or doc['id']}{suffix}")
+    return {"role": "user", "content": "\n".join(lines)}
 
 def clip(s, max_chars=16000):
     return s if len(s)<=max_chars else s[:max_chars]
@@ -311,10 +434,10 @@ def get_title_for_chat(last_user_msg):
         if oc is None:
             raise RuntimeError("OPENAI_API_KEY not configured")
         response = oc.responses.create(
-            model="gpt-4.1-nano",
+            model="gpt-5.4-nano",
             instructions="Given this user's request, give the Chat a title that will be shown in the list of chats. Return a string of max 5 words. Don't return any additional content, just the title.",
             input=[{"role": "user", "content": last_user_msg[:200]}],
-            # reasoning={"effort": "low"},
+            reasoning={"effort": "none"},
         )
         raw_title = response.output_text
         title = normalize_title(raw_title, last_user_msg)
@@ -337,10 +460,10 @@ Return 'fast_model' if the user's request is rather simple or a general knowledg
         if oc is None:
             return False
         response = oc.responses.create(
-            model="gpt-4.1-mini",
+            model="gpt-5.4-nano",
             instructions=instruction,
             input=[{"role": "user", "content": f"User request:\n{last_user_msg}"}],
-            # reasoning={"effort": "low"},
+            reasoning={"effort": "none"},
         )
         # print("response:", response.output_text)
         if "fast_model" in response.output_text.strip().lower():
@@ -354,18 +477,18 @@ Return 'fast_model' if the user's request is rather simple or a general knowledg
             return False
     except Exception as e:
         return False
-        
+
 def run_tool(ctx: AgentContext, tool_name, tool_args) -> str:
     """ do before: tool_args = json.loads(item.arguments) """
-    
+
     def push_trace(evt):  # uniform schema for UI
         # evt: {type, step, tool?, args?, message?, status?, result_count?}
         ctx.trace.append(evt)
-    
+
     if tool_name == "emit_event":
         # result to be ack'd back into openai_messages later
         result = json.dumps({"ok": True})
-        
+
         push_trace({
             "type": "reasoning",
             "step": ctx.iteration_count,
@@ -374,7 +497,7 @@ def run_tool(ctx: AgentContext, tool_name, tool_args) -> str:
         })
 
         log_tool_call(ctx.iteration_count, tool_name, tool_args, "emitted")
-    
+
     elif tool_name == "search_cases":
         query = tool_args.get("query", ctx.last_user_msg)
         filters = tool_args.get("filters", {})
@@ -397,13 +520,18 @@ def run_tool(ctx: AgentContext, tool_name, tool_args) -> str:
                 did = (p or {}).get("doc_id") or (p or {}).get("id")
                 if did:
                     snip = (p or {}).get("passage") or (p or {}).get("snippet") or ""
-                    ctx.citations.append({"doc_id": did, "snippet": snip[:400]})
+                    ctx.citations.append({
+                        "doc_id": did,
+                        "snippet": snip[:400],
+                        "title": (p or {}).get("title"),
+                        "download_url": (p or {}).get("download_url"),
+                    })
         except Exception as _e:
             pass
         push_trace({"type":"tool_result","step":ctx.iteration_count,"tool":"fetch_passages","result_count":len(result)})
         log_tool_call(ctx.iteration_count, tool_name, tool_args, result)
-    
-    elif tool_name == "fetch_document":                    
+
+    elif tool_name == "fetch_document":
         doc_id = tool_args.get("id", "")
         max_tokens = int(tool_args.get("max_tokens", 2048))
 
@@ -414,12 +542,17 @@ def run_tool(ctx: AgentContext, tool_name, tool_args) -> str:
                 did = result.get("id") or doc_id
                 txt = (result.get("text") or "")
                 if did and txt:
-                    ctx.citations.append({"doc_id": did, "snippet": txt[:240]})
+                    ctx.citations.append({
+                        "doc_id": did,
+                        "snippet": txt[:240],
+                        "title": result.get("title"),
+                        "download_url": result.get("download_url"),
+                    })
         except Exception as _e:
             pass
         push_trace({"type":"tool_result","step":ctx.iteration_count,"tool":"fetch_document","result_count":1 if result else 0})
-        log_tool_call(ctx.iteration_count, tool_name, tool_args, result)            
-    
+        log_tool_call(ctx.iteration_count, tool_name, tool_args, result)
+
     else:
         print(f"❌ **Unknown tool name: {tool_name}**")
         result = "Unknown tool"
@@ -430,16 +563,73 @@ def dedupe_citations(cites: list[dict]) -> list[dict]:
     seen = set(); out=[]
     for c in cites:
         did = c.get("doc_id")
-        if did and did not in seen:
-            out.append(c); seen.add(did)
+        if not did:
+            continue
+        if did not in seen:
+            out.append({k: v for k, v in c.items() if v is not None})
+            seen.add(did)
+            continue
+        existing = next((item for item in out if item.get("doc_id") == did), None)
+        if existing:
+            for key in ("title", "download_url", "snippet"):
+                if not existing.get(key) and c.get(key):
+                    existing[key] = c[key]
     return out
+
+def tool_progress_message(tool_name: str, tool_args: dict[str, Any]) -> str | None:
+    if tool_name == "emit_event":
+        return tool_args.get("message", "Pensando")
+    if tool_name == "search_cases":
+        query = tool_args.get("query", "[Consulta no disponible.]")
+        return f"Buscando documentos relevantes a la siguiente consulta: {query}..."
+    if tool_name == "fetch_passages":
+        return "Recuperando pasajes relevantes..."
+    if tool_name == "fetch_document":
+        return "Recuperando documentos relevantes..."
+    return None
+
+def parse_emit_event_text(text: str) -> str | None:
+    """Treat plain-text emit_event JSON as a progress event, not answer text."""
+    raw = (text or "").strip()
+    if not (raw.startswith("{") and raw.endswith("}")):
+        return None
+    try:
+        payload = json.loads(raw)
+    except Exception:
+        return None
+    if not isinstance(payload, dict):
+        return None
+    msg = payload.get("message")
+    if isinstance(msg, str) and msg.strip():
+        return msg.strip()
+    return None
+
+def parse_partial_emit_event_message(arguments: str) -> str | None:
+    match = re.search(r'"message"\s*:\s*"((?:\\.|[^"\\])*)"', arguments or "")
+    if not match:
+        return None
+    try:
+        return json.loads(f'"{match.group(1)}"').strip()
+    except Exception:
+        return match.group(1).strip()
 
 import asyncio
 import json
 
 @router.post("/chat/agentic/stream")
-async def chat_agentic_stream(req: AgenticChatRequest):
-    
+async def chat_agentic_stream(
+    req: AgenticChatRequest,
+    user: UserData = Depends(get_current_user),
+):
+    accessible_spaces = get_accessible_spaces(user)
+    if req.space not in accessible_spaces:
+        print(
+            f"chat_agentic_stream forbidden: requested_space={req.space!r} "
+            f"user={user.username!r} accessible_spaces={accessible_spaces!r}",
+            flush=True,
+        )
+        raise HTTPException(403, detail="Space not accessible")
+
     openai_messages: list[dict[str, Any]] = []
     if req.state:
         try:
@@ -449,11 +639,31 @@ async def chat_agentic_stream(req: AgenticChatRequest):
         except Exception as e:
             print("bad state:", e)
 
+    openai_messages = [
+        msg for msg in openai_messages
+        if not (
+            isinstance(msg, dict)
+            and msg.get("role") == "user"
+            and isinstance(msg.get("content"), str)
+            and msg["content"].startswith("The user attached these indexed documents as chat context.")
+        )
+    ]
+
+    context_documents = resolve_context_documents(req)
+    context_msg = context_documents_message(context_documents)
+    if context_msg:
+        openai_messages.append(context_msg)
+
     last_user_msg = req.messages[-1]['content']
     openai_messages.append({"role": "user", "content": last_user_msg})
     # print(f"openai_messages: {openai_messages}")
 
-    ctx = AgentContext(space=req.space, openai_messages=openai_messages, last_user_msg=last_user_msg)
+    ctx = AgentContext(
+        space=req.space,
+        openai_messages=openai_messages,
+        last_user_msg=last_user_msg,
+        context_documents=context_documents,
+    )
     cfg = AgentConfig(model=settings.OPENAI_CHAT_MODEL, system_prompt=SYSTEM_PROMPT_V1, tools=tools)
 
     # final_answer = ""
@@ -476,6 +686,10 @@ async def chat_agentic_stream(req: AgenticChatRequest):
         async def emit(event: str, obj: dict):
             yield f"event: {event}\n".encode("utf-8")
             yield f"data: {json.dumps(obj, ensure_ascii=False)}\n\n".encode("utf-8")
+
+        # Open the response body immediately and push enough bytes to get past
+        # buffering thresholds in common proxies/load balancers.
+        yield f": {' ' * 2048}\n\n".encode("utf-8")
 
         # if is_respond_fast(last_user_msg):
         #     stream = client.responses.create(
@@ -551,8 +765,10 @@ async def chat_agentic_stream(req: AgenticChatRequest):
 
             # Local accumulators for this streamed turn
             acc_text: list[str] = []
-            
+            pending_text: list[str] = []
+
             final_tool_calls = {}
+            emitted_tool_call_indices = set()
             for ev in stream:
                 t = getattr(ev, "type", None)
 
@@ -560,8 +776,19 @@ async def chat_agentic_stream(req: AgenticChatRequest):
                 if t == "response.output_item.added":
                     if ev.item.type == "function_call":
                         final_tool_calls[ev.output_index] = ev.item
+                        msg = tool_progress_message(ev.item.name, {})
+                        if msg:
+                            await asyncio.sleep(0)
+                            async for chunk in emit("response.emit_message", {"step": ctx.iteration_count, "msg": msg}):
+                                yield chunk
+                            if ev.item.name != "emit_event":
+                                emitted_tool_call_indices.add(ev.output_index)
                     elif ev.item.type == "reasoning":
                         pass  # no action needed
+                if t == "response.output_item.done":
+                    item = getattr(ev, "item", None)
+                    if getattr(item, "type", None) == "function_call":
+                        final_tool_calls[ev.output_index] = item
 
                 # Reasoning (UI)
                 if t == "response.reasoning_summary_text.delta":
@@ -574,43 +801,81 @@ async def chat_agentic_stream(req: AgenticChatRequest):
                 # Function tools
                 if t == "response.function_call_arguments.delta":
                     index = ev.output_index
-                    if final_tool_calls[index]:
+                    if final_tool_calls.get(index):
                         final_tool_calls[index].arguments += ev.delta
+                        tool_call = final_tool_calls[index]
+                        if getattr(tool_call, "name", None) == "emit_event" and index not in emitted_tool_call_indices:
+                            msg = parse_partial_emit_event_message(getattr(tool_call, "arguments", ""))
+                            if msg:
+                                await asyncio.sleep(0)
+                                async for chunk in emit("response.emit_message", {"step": ctx.iteration_count, "msg": msg}):
+                                    yield chunk
+                                emitted_tool_call_indices.add(index)
 
                 if t == "response.function_call_arguments.done":
                     index = ev.output_index
+                    if index not in final_tool_calls:
+                        final_tool_calls[index] = SimpleNamespace(
+                            type="function_call",
+                            name=getattr(ev, "name", None),
+                            arguments=getattr(ev, "arguments", "{}"),
+                            call_id=getattr(ev, "call_id", None),
+                        )
                     tool_call = final_tool_calls[index]
+                    if getattr(ev, "arguments", None):
+                        tool_call.arguments = ev.arguments
                     tool_name = getattr(tool_call, "name")
                     tool_args = json.loads(getattr(tool_call, "arguments"))
 
-                    if tool_name == "emit_event":
-                        msg = tool_args.get("message", "Pensando")
-                    elif tool_name == "search_cases":
-                        query = tool_args.get("query", "[Consulta no disponible.]")
-                        msg = f"Buscando documentos relevantes a la siguiente consulta: {query}..."
-                    elif tool_name == "fetch_passages":
-                        msg = "Recuperando pasajes relevantes..."
-                    elif tool_name == "fetch_document":
-                        msg = "Recuperando documentos relevantes..."
-                    else:
+                    msg = tool_progress_message(tool_name, tool_args)
+                    if not msg:
                         break
-                    
-                    await asyncio.sleep(0)  # optional, helps flush
-                    async for chunk in emit("response.emit_message", {"step": ctx.iteration_count, "msg": msg}):
-                        yield chunk
-                    
+
+                    if index not in emitted_tool_call_indices:
+                        await asyncio.sleep(0)  # optional, helps flush
+                        async for chunk in emit("response.emit_message", {"step": ctx.iteration_count, "msg": msg}):
+                            yield chunk
+                        emitted_tool_call_indices.add(index)
+
                     break
-                
+
                 # Output text
                 if t == "response.output_text.delta":
                     d = getattr(ev, "delta", "") or ""
                     acc_text.append(d)
-                    await asyncio.sleep(0)  # optional, helps flush
-                    async for chunk in emit("response.output_text.delta", {"step": ctx.iteration_count, "delta": d}):
-                        yield chunk
+                    current_text = "".join(acc_text)
+                    if current_text.lstrip().startswith("{"):
+                        pending_text.append(d)
+                    else:
+                        if pending_text:
+                            d = "".join(pending_text) + d
+                            pending_text.clear()
+                        await asyncio.sleep(0)  # optional, helps flush
+                        async for chunk in emit("response.output_text.delta", {"step": ctx.iteration_count, "delta": d}):
+                            yield chunk
                 if t == "response.output_text.done":
                     txt = getattr(ev, "text", "") or ""
-                    ctx.final_answer = txt or "".join(acc_text)
+                    done_text = txt or "".join(acc_text)
+                    progress_msg = parse_emit_event_text(done_text)
+                    if progress_msg:
+                        await asyncio.sleep(0)
+                        async for chunk in emit("response.emit_message", {"step": ctx.iteration_count, "msg": progress_msg}):
+                            yield chunk
+                        ctx.openai_messages.append({
+                            "role": "assistant",
+                            "content": f"[progress note shown to user: {progress_msg}]",
+                        })
+                        ctx.openai_messages.append({
+                            "role": "user",
+                            "content": "Continue with the task. Do not output emit_event JSON as text; either call tools or provide the final answer.",
+                        })
+                        continue
+                    ctx.final_answer = done_text
+                    if pending_text:
+                        await asyncio.sleep(0)
+                        async for chunk in emit("response.output_text.delta", {"step": ctx.iteration_count, "delta": "".join(pending_text)}):
+                            yield chunk
+                        pending_text.clear()
                     await asyncio.sleep(0)  # optional, helps flush
                     async for chunk in emit("response.output_text.done", {"step": ctx.iteration_count, "text": ctx.final_answer}):
                         yield chunk
@@ -630,10 +895,18 @@ async def chat_agentic_stream(req: AgenticChatRequest):
 
             for tool_call_index in final_tool_calls:
                 tool_call = final_tool_calls[tool_call_index]
-                    
+
                 tool_name = getattr(tool_call, "name")
                 tool_args = json.loads(getattr(tool_call, "arguments"))
                 call_id = getattr(tool_call, "call_id")
+
+                if tool_call_index not in emitted_tool_call_indices:
+                    msg = tool_progress_message(tool_name, tool_args)
+                    if msg:
+                        await asyncio.sleep(0)
+                        async for chunk in emit("response.emit_message", {"step": ctx.iteration_count, "msg": msg}):
+                            yield chunk
+                        emitted_tool_call_indices.add(tool_call_index)
 
                 ctx.openai_messages.append({
                     "type": "function_call",
@@ -655,7 +928,7 @@ async def chat_agentic_stream(req: AgenticChatRequest):
                     "call_id": call_id,
                     "output": str(result),
                 })
-            
+
             continue  # next reasoning iteration
 
         if ctx.final_answer == "":
@@ -682,5 +955,14 @@ async def chat_agentic_stream(req: AgenticChatRequest):
         # Final summary event (mirrors your non-stream return payload)
         async for chunk in emit("response.completed", completed_payload):
             yield chunk
-    
-    return StreamingResponse(event_stream(), media_type="text/event-stream")
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache, no-transform",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+            "X-Content-Type-Options": "nosniff",
+        },
+    )

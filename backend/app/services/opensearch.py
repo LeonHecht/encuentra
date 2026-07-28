@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import json
 import re
+import time
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable
 from urllib.parse import urlparse
@@ -79,13 +81,18 @@ class OpenSearchSearch:
                 "verify_certs": settings.OPENSEARCH_VERIFY_CERTS,
             }
 
+            use_sigv4 = self._uses_sigv4()
             aws_region = getattr(settings, "OPENSEARCH_AWS_REGION", None)
 
-            # --- Branch 1: AWS (Managed / Serverless via IAM + SigV4) ---
-            if aws_region:
+            # --- Branch 1: AWS-managed OpenSearch / Serverless via IAM + SigV4 ---
+            if use_sigv4:
                 if boto3 is None:
                     raise RuntimeError(
                         "boto3 is required for AWS OpenSearch IAM auth but is not installed."
+                    )
+                if not aws_region:
+                    raise RuntimeError(
+                        "OPENSEARCH_SIGV4=true requires OPENSEARCH_AWS_REGION to be set."
                     )
 
                 service = getattr(settings, "OPENSEARCH_AWS_SERVICE", "aoss")
@@ -106,7 +113,7 @@ class OpenSearchSearch:
                     }
                 )
 
-            # --- Branch 2: Local / non-AWS clusters (dev) ---
+            # --- Branch 2: Local / self-hosted clusters, including Docker on EC2 ---
             else:
                 auth = None
                 if settings.OPENSEARCH_USERNAME and settings.OPENSEARCH_PASSWORD:
@@ -136,12 +143,11 @@ class OpenSearchSearch:
         if client.indices.exists(index=index_name):
             return
 
-        # Base index settings, used for both local and AOSS
+        # Base index settings, used for both self-hosted clusters and AOSS.
         index_settings: dict[str, Any] = {}
-        service = getattr(settings, "OPENSEARCH_AWS_SERVICE", "aoss")
 
-        # Only set shards/replicas when NOT on Serverless
-        if service != "aoss":
+        # Only set shards/replicas when NOT on Serverless.
+        if not self._is_serverless():
             index_settings.update(
                 {
                     "number_of_shards": 1,
@@ -174,7 +180,13 @@ class OpenSearchSearch:
                         "analyzer": "spanish_default",
                     },
                     "space": {"type": "keyword"},
+                    "case_year": {"type": "integer"},
                     "download_url": {"type": "keyword"},
+                    "s3_text_key": {"type": "keyword"},
+                    "s3_file_key": {"type": "keyword"},
+                    "s3_text_etag": {"type": "keyword"},
+                    "s3_last_modified": {"type": "date"},
+                    "indexed_at": {"type": "date"},
                 }
             },
         }
@@ -200,9 +212,78 @@ class OpenSearchSearch:
                 return f"/files/{candidate.name}"
         return None
 
+    def _presign_key(self, key: str | None) -> str | None:
+        if boto3 is None or not key:
+            return None
+        bucket = getattr(settings, "S3_BUCKET", None)
+        if not bucket:
+            return None
+
+        client = self._get_s3_client()
+        candidate_keys = [key]
+        if key.endswith(".pdf"):
+            candidate_keys.append(f"{key[:-4]}.PDF")
+
+        for candidate_key in candidate_keys:
+            try:
+                client.head_object(Bucket=bucket, Key=candidate_key)
+                return client.generate_presigned_url(
+                    "get_object",
+                    Params={"Bucket": bucket, "Key": candidate_key},
+                    ExpiresIn=int(getattr(settings, "S3_URL_TTL", 604800)),
+                )
+            except Exception:
+                continue
+        return None
+
+    def _s3_relative_text_path(self, text_key: str | None) -> str | None:
+        text_prefix_raw = getattr(settings, "S3_TEXT_PREFIX", None)
+        if not text_key or not text_prefix_raw:
+            return None
+        text_prefix = str(text_prefix_raw).rstrip("/") + "/"
+        if not text_key.startswith(text_prefix):
+            return None
+        relative = text_key[len(text_prefix):]
+        return relative or None
+
+    def _s3_file_key_from_text_key(self, text_key: str | None) -> str | None:
+        files_prefix_raw = getattr(settings, "S3_FILES_PREFIX", None)
+        relative = self._s3_relative_text_path(text_key)
+        if not files_prefix_raw or not relative:
+            return None
+
+        files_prefix = str(files_prefix_raw).rstrip("/") + "/"
+        stem = relative.rsplit(".", 1)[0] if "." in relative else relative
+        return f"{files_prefix}{stem}.PDF"
+
+    def _year_from_relative_s3_path(self, relative: str | None) -> int | None:
+        if not relative:
+            return None
+        first_part = relative.split("/", 1)[0]
+        if len(first_part) == 4 and first_part.isdigit():
+            return int(first_part)
+        return None
+
+    def _s3_case_year_from_text_key(self, text_key: str | None) -> int | None:
+        return self._year_from_relative_s3_path(self._s3_relative_text_path(text_key))
+
+    def _s3_case_year_from_file_key(self, file_key: str | None) -> int | None:
+        files_prefix_raw = getattr(settings, "S3_FILES_PREFIX", None)
+        if not file_key or not files_prefix_raw:
+            return None
+        files_prefix = str(files_prefix_raw).rstrip("/") + "/"
+        if not file_key.startswith(files_prefix):
+            return None
+        return self._year_from_relative_s3_path(file_key[len(files_prefix):])
+
+    def _case_year_from_source(self, source: dict[str, Any]) -> int | None:
+        return source.get("case_year") or self._s3_case_year_from_file_key(source.get("s3_file_key"))
+
     def _presign_by_id(self, doc_id: str) -> str | None:
-        """Attempt to generate a presigned S3 URL for a given document id.
-        Tries a set of known extensions and returns the first existing object's URL.
+        """Legacy fallback for old index documents without s3_file_key.
+
+        This scans nested S3 prefixes and is intentionally not used by normal
+        search results. Prefer _presign_key(source["s3_file_key"]).
         """
         if boto3 is None:
             return None
@@ -215,40 +296,21 @@ class OpenSearchSearch:
             prefix = str(prefix_raw).rstrip("/") + "/"
             exts = (".pdf", ".PDF", ".htm", ".html", ".HTML", ".docx", ".doc", ".txt")
 
-            # 1) Fast path: try keys without any year/extra folders,
-            #    i.e. <prefix><doc_id><ext>
             for ext in exts:
                 key = f"{prefix}{doc_id}{ext}"
                 try:
                     client.head_object(Bucket=bucket, Key=key)
                 except ClientError:
                     continue
-                try:
-                    return client.generate_presigned_url(
-                        "get_object",
-                        Params={"Bucket": bucket, "Key": key},
-                        ExpiresIn=int(getattr(settings, "S3_URL_TTL", 604800)),
-                    )
-                except Exception:
-                    return None
+                return self._presign_key(key)
 
-            # 2) Fallback: handle layouts like "year/doc_id.ext" where doc_id
-            #    itself does not contain the year. We scan under the configured
-            #    prefix and look for any key that ends with "/<doc_id><ext>".
             paginator = client.get_paginator("list_objects_v2")
             for page in paginator.paginate(Bucket=bucket, Prefix=prefix):
                 for obj in page.get("Contents", []):
                     k = obj.get("Key", "")
                     for ext in exts:
                         if k.endswith(f"/{doc_id}{ext}"):
-                            try:
-                                return client.generate_presigned_url(
-                                    "get_object",
-                                    Params={"Bucket": bucket, "Key": k},
-                                    ExpiresIn=int(getattr(settings, "S3_URL_TTL", 604800)),
-                                )
-                            except Exception:
-                                return None
+                            return self._presign_key(k)
         except Exception:
             return None
         return None
@@ -398,6 +460,82 @@ class OpenSearchSearch:
                 "_source": doc,
             }
 
+    def _s3_doc_id(self, key: str) -> str:
+        filename = key.rsplit("/", 1)[-1]
+        stem = filename.rsplit(".", 1)[0] or filename
+        safe = re.sub(r"[^A-Za-z0-9_.-]+", "-", stem).strip("-")
+        return safe or str(abs(hash(key)))
+
+    def _iter_s3_text_objects(self):
+        if boto3 is None:
+            raise RuntimeError("boto3 is required for S3 indexing but is not installed.")
+        bucket = getattr(settings, "S3_BUCKET", None)
+        prefix_raw = getattr(settings, "S3_TEXT_PREFIX", None)
+        if not bucket or not prefix_raw:
+            raise RuntimeError("S3_BUCKET and S3_TEXT_PREFIX are required for S3 incremental indexing.")
+
+        client = self._get_s3_client()
+        prefix = str(prefix_raw).rstrip("/") + "/"
+        paginator = client.get_paginator("list_objects_v2")
+        for page in paginator.paginate(Bucket=bucket, Prefix=prefix):
+            for obj in page.get("Contents", []):
+                key = obj.get("Key", "")
+                if key.lower().endswith(".txt"):
+                    yield obj
+
+    def _existing_s3_metadata(self, client: OpenSearch, index_name: str, doc_id: str) -> dict[str, Any]:
+        try:
+            existing = client.get(
+                index=index_name,
+                id=doc_id,
+                _source_includes=["s3_text_etag", "s3_file_key", "case_year"],
+            )
+        except NotFoundError:
+            return {}
+        except Exception:
+            return {}
+        return existing.get("_source", {}) or {}
+
+    def _load_s3_text_doc(self, obj: dict[str, Any], space: str) -> dict[str, Any] | None:
+        bucket = settings.S3_BUCKET
+        key = obj.get("Key")
+        if not bucket or not key:
+            return None
+
+        client = self._get_s3_client()
+        try:
+            text_obj = client.get_object(Bucket=bucket, Key=key)
+            raw_bytes = text_obj["Body"].read()
+            try:
+                text = raw_bytes.decode("utf-8")
+            except Exception:
+                text = raw_bytes.decode("latin-1", errors="ignore")
+        except Exception as e:
+            print(f"[OpenSearch] Failed to read s3://{bucket}/{key}: {e}")
+            return None
+
+        doc_id = self._s3_doc_id(key)
+        etag = str(obj.get("ETag", "")).strip('"')
+        last_modified = obj.get("LastModified")
+        last_modified_value = last_modified.isoformat() if hasattr(last_modified, "isoformat") else None
+        s3_file_key = self._s3_file_key_from_text_key(key)
+        case_year = self._s3_case_year_from_text_key(key)
+        download_url = self._presign_key(s3_file_key) if getattr(settings, "S3_PRESIGN_ON_INDEX", False) else None
+
+        return {
+            "id": doc_id,
+            "title": doc_id,
+            "text": text,
+            "space": space,
+            "case_year": case_year,
+            "download_url": download_url,
+            "s3_text_key": key,
+            "s3_file_key": s3_file_key,
+            "s3_text_etag": etag,
+            "s3_last_modified": last_modified_value,
+            "indexed_at": datetime.now(timezone.utc).isoformat(),
+        }
+
     def _wait_for_cluster(self, timeout=30):
         c = self._get_client()
         import time
@@ -420,16 +558,21 @@ class OpenSearchSearch:
             self._s3_client = boto3.client("s3")
         return self._s3_client
     
+    def _uses_sigv4(self) -> bool:
+        return bool(getattr(settings, "OPENSEARCH_SIGV4", False))
+
     def _is_serverless(self):
-        return getattr(settings, "OPENSEARCH_AWS_SERVICE", "aoss") == "aoss" and getattr(settings, "OPENSEARCH_AWS_REGION", None)
+        return self._uses_sigv4() and getattr(settings, "OPENSEARCH_AWS_SERVICE", "aoss") == "aoss"
     
     # ------------------------------------------------------------------
     # Public API (mirrors BM25Search)
     # ------------------------------------------------------------------
     def index(self, space: str = "supreme_court") -> None:
+        print(f"[OpenSearch] Starting indexing for space '{space}'...")
         if not self._is_serverless():
             self._wait_for_cluster()
         
+        print(f"[OpenSearch] Loading documents for space '{space}'...")
         client = self._get_client()
         alias = self._alias_name(space)
 
@@ -437,7 +580,8 @@ class OpenSearchSearch:
         if not documents:
             print(f"[OpenSearch] No documents to index for space '{space}'.")
             return
-
+        
+        print(f"[OpenSearch] Indexing {len(documents)} documents for space '{space}' into OpenSearch...")
         build_name = (
             alias if self._is_serverless() else self._build_index_name(space, suffix=str(int(__import__("time").time())))
         )
@@ -477,6 +621,162 @@ class OpenSearchSearch:
         else:
             print(f"[OpenSearch] Indexed {len(documents)} docs into serverless index '{build_name}'.")
 
+    def index_incremental(
+        self,
+        space: str = "supreme_court",
+        delete_missing: bool | None = None,
+        progress_every: int = 500,
+    ) -> dict[str, int]:
+        """Incrementally index S3 text files into the stable space index.
+
+        Intended for one-off ECS jobs, not FastAPI startup. Stores S3 key/ETag
+        metadata and skips documents whose ETag is unchanged.
+        """
+        if space != "supreme_court":
+            raise RuntimeError("Incremental S3 indexing is currently only supported for supreme_court.")
+        if not getattr(settings, "S3_BUCKET", None) or not getattr(settings, "S3_TEXT_PREFIX", None):
+            raise RuntimeError("S3_BUCKET and S3_TEXT_PREFIX must be configured for incremental indexing.")
+
+        progress_every = max(1, progress_every)
+        started_at = time.monotonic()
+
+        print(f"[OpenSearch] Starting incremental indexing for space '{space}'.", flush=True)
+        if not self._is_serverless():
+            self._wait_for_cluster()
+
+        client = self._get_client()
+        index_name = self._alias_name(space)
+        self._create_index_if_needed(client, index_name)
+
+        delete_missing = (
+            getattr(settings, "OPENSEARCH_DELETE_MISSING_S3_DOCS", False)
+            if delete_missing is None
+            else delete_missing
+        )
+
+        seen_ids: set[str] = set()
+        stats = {
+            "seen": 0,
+            "skipped": 0,
+            "indexed": 0,
+            "failed": 0,
+            "deleted": 0,
+            "bytes_seen": 0,
+            "bytes_indexed": 0,
+        }
+
+        def log_progress(label: str) -> None:
+            elapsed = max(time.monotonic() - started_at, 0.001)
+            files_per_min = stats["seen"] / (elapsed / 60)
+            mb_seen = stats["bytes_seen"] / (1024 * 1024)
+            mb_indexed = stats["bytes_indexed"] / (1024 * 1024)
+            print(
+                "[OpenSearch] "
+                f"{label}: seen={stats['seen']} indexed={stats['indexed']} "
+                f"skipped={stats['skipped']} failed={stats['failed']} deleted={stats['deleted']} "
+                f"scanned={mb_seen:.1f}MiB changed={mb_indexed:.1f}MiB "
+                f"elapsed={elapsed:.0f}s rate={files_per_min:.1f} files/min.",
+                flush=True,
+            )
+
+        print(
+            "[OpenSearch] Incremental source: "
+            f"s3://{settings.S3_BUCKET}/{str(settings.S3_TEXT_PREFIX).rstrip('/')}/ -> "
+            f"index '{index_name}', progress_every={progress_every}, delete_missing={delete_missing}.",
+            flush=True,
+        )
+
+        def actions():
+            for obj in self._iter_s3_text_objects():
+                stats["seen"] += 1
+                size = int(obj.get("Size") or 0)
+                stats["bytes_seen"] += size
+
+                key = obj.get("Key", "")
+                doc_id = self._s3_doc_id(key)
+                seen_ids.add(doc_id)
+                etag = str(obj.get("ETag", "")).strip('"')
+                expected_file_key = self._s3_file_key_from_text_key(key)
+                expected_case_year = self._s3_case_year_from_text_key(key)
+                existing = self._existing_s3_metadata(client, index_name, doc_id)
+
+                if (
+                    etag
+                    and existing.get("s3_text_etag") == etag
+                    and existing.get("s3_file_key") == expected_file_key
+                    and existing.get("case_year") == expected_case_year
+                ):
+                    stats["skipped"] += 1
+                    if stats["seen"] % progress_every == 0:
+                        log_progress("progress")
+                    continue
+
+                doc = self._load_s3_text_doc(obj, space)
+                if not doc:
+                    stats["failed"] += 1
+                    if stats["seen"] % progress_every == 0:
+                        log_progress("progress")
+                    continue
+
+                stats["indexed"] += 1
+                stats["bytes_indexed"] += size
+                if stats["seen"] % progress_every == 0:
+                    log_progress("progress")
+
+                yield {
+                    "_op_type": "index",
+                    "_index": index_name,
+                    "_id": doc["id"],
+                    "_source": doc,
+                }
+
+        helpers.bulk(
+            client,
+            actions(),
+            chunk_size=settings.OPENSEARCH_BULK_CHUNK_SIZE,
+            refresh="wait_for",
+            raise_on_error=False,
+            raise_on_exception=False,
+        )
+        log_progress("bulk indexing finished")
+
+        if delete_missing:
+            print("[OpenSearch] Checking for indexed S3 documents missing from current S3 listing.", flush=True)
+            response = client.search(
+                index=index_name,
+                body={
+                    "size": 10000,
+                    "_source": False,
+                    "query": {"exists": {"field": "s3_text_key"}},
+                },
+                scroll="2m",
+            )
+            scroll_id = response.get("_scroll_id")
+            while True:
+                hits = response.get("hits", {}).get("hits", [])
+                if not hits:
+                    break
+                delete_actions = [
+                    {"_op_type": "delete", "_index": index_name, "_id": hit["_id"]}
+                    for hit in hits
+                    if hit.get("_id") not in seen_ids
+                ]
+                if delete_actions:
+                    for ok, _ in helpers.streaming_bulk(client, delete_actions, raise_on_error=False):
+                        if ok:
+                            stats["deleted"] += 1
+                            if stats["deleted"] % progress_every == 0:
+                                log_progress("delete progress")
+                if not scroll_id:
+                    break
+                response = client.scroll(scroll_id=scroll_id, scroll="2m")
+                scroll_id = response.get("_scroll_id")
+            if scroll_id:
+                client.clear_scroll(scroll_id=scroll_id, ignore=[404])
+
+        log_progress("incremental indexing complete")
+        return stats
+
     def has_space(self, space: str) -> bool:
         """Return True if the logical space exists (alias or index)."""
         client = self._get_client()
@@ -488,7 +788,7 @@ class OpenSearchSearch:
         except Exception:
             return False
 
-    def search(self, query: str, top_k: int = 30, space: str = "supreme_court") -> list[dict[str, Any]]:
+    def search(self, query: str, top_k: int = 30, space: str = "supreme_court", year: int | None = None) -> list[dict[str, Any]]:
         client = self._get_client()
         alias = self._alias_name(space)
         target_index = alias
@@ -497,44 +797,74 @@ class OpenSearchSearch:
                 print(f"[OpenSearch] Alias/index '{alias}' missing for space '{space}'.")
                 return []
 
+        search_query = {
+            "multi_match": {
+                "query": query,
+                "fields": ["title^2", "text"],
+                "type": "best_fields",
+            }
+        }
+        if year is not None:
+            year_text = str(year)
+            year_filter = {
+                "bool": {
+                    "should": [
+                        {"term": {"case_year": year}},
+                        {"prefix": {"s3_file_key": f"pdfs/data/{year_text}/"}},
+                        {"prefix": {"s3_text_key": f"pdfs/text/{year_text}/"}},
+                        {"wildcard": {"s3_file_key": f"*/{year_text}/*"}},
+                        {"wildcard": {"s3_text_key": f"*/{year_text}/*"}},
+                    ],
+                    "minimum_should_match": 1,
+                }
+            }
+            search_query = {
+                "bool": {
+                    "must": [search_query],
+                    "filter": [year_filter],
+                }
+            }
+
         body = {
             "size": top_k,
-            "query": {
-                "multi_match": {
-                    "query": query,
-                    "fields": ["title^2", "text"],
-                    "type": "best_fields",
-                }
-            },
-            "highlight": {
+            "timeout": f"{settings.OPENSEARCH_SEARCH_TIMEOUT}s",
+            "track_total_hits": False,
+            "_source": {"includes": ["id", "title", "case_year", "download_url", "s3_file_key"]},
+            "query": search_query,
+        }
+
+        if settings.OPENSEARCH_ENABLE_HIGHLIGHTS:
+            body["highlight"] = {
                 "fields": {
                     "text": {
-                        "fragment_size": 200,
+                        "fragment_size": settings.OPENSEARCH_HIGHLIGHT_FRAGMENT_SIZE,
                         "number_of_fragments": 1,
                     }
                 }
-            },
-        }
+            }
 
-        response = client.search(index=target_index, body=body)
+        response = client.search(
+            index=target_index,
+            body=body,
+            request_timeout=settings.OPENSEARCH_SEARCH_TIMEOUT,
+        )
         hits: list[dict[str, Any]] = []
         for hit in response.get("hits", {}).get("hits", []):
             source = hit.get("_source", {})
             snippet = ""
             highlight = hit.get("highlight", {}).get("text")
             if highlight:
-                snippet = " … ".join(highlight)
+                snippet = " ... ".join(highlight)
             else:
-                text = source.get("text", "")
-                snippet = " ".join(text.split()[:50])
-            # Lazily presign S3 URLs at query time if missing in index
+                snippet = source.get("title", "")
             dl_url = source.get("download_url")
-            if not dl_url and getattr(settings, "S3_PRESIGN_ON_QUERY", True):
-                dl_url = self._presign_by_id(source.get("id") or hit.get("_id"))
+            if not dl_url and getattr(settings, "S3_PRESIGN_ON_SEARCH", False):
+                dl_url = self._presign_key(source.get("s3_file_key"))
             hits.append(
                 {
                     "id": source.get("id") or hit.get("_id"),
                     "title": source.get("title", ""),
+                    "case_year": self._case_year_from_source(source),
                     "score": float(hit.get("_score") or 0.0),
                     "snippet": snippet,
                     "download_url": dl_url,
@@ -553,14 +883,15 @@ class OpenSearchSearch:
         source = doc.get("_source", {})
         dl_url = source.get("download_url")
         if not dl_url and getattr(settings, "S3_PRESIGN_ON_QUERY", True):
-            dl_url = self._presign_by_id(doc_id)
+            dl_url = self._presign_key(source.get("s3_file_key")) or self._presign_by_id(doc_id)
         return {
             "id": doc_id,
             "title": source.get("title", ""),
+            "case_year": self._case_year_from_source(source),
             "text": source.get("text", ""),
             "download_url": dl_url,
         }
-    
+
     def fetch_passages(
         self,
         *,
@@ -569,11 +900,11 @@ class OpenSearchSearch:
         query: str,
         per_id: int = 3,
         max_tokens: int = 350,
-        chars_per_token: int = 4,   # ≈ Spanish tokens; tweak if you like
+        chars_per_token: int = 4,
     ) -> list[dict]:
         """
-        Return up to `per_id` passages from the given doc (id=doc_id) that best match `query`.
-        Each passage is ~`max_tokens` tokens (approx via chars_per_token).
+        Return up to `per_id` passages from the given doc that best match `query`.
+        Each passage is approximately `max_tokens` tokens.
         """
         client = self._get_client()
         alias = self._alias_name(space)
@@ -585,20 +916,21 @@ class OpenSearchSearch:
         fragment_size = max(128, min(8192, int(max_tokens * chars_per_token)))
 
         body = {
-            "size": 1,  # we only need this one doc
+            "size": 1,
             "query": {
                 "bool": {
                     "must": [
-                        {"term": {"id": doc_id}},            # restrict to this doc
-                        {"multi_match": {                     # score relevance within the doc
-                            "query": query,
-                            "fields": ["title^2", "text"],
-                            "type": "best_fields",
-                        }},
+                        {"term": {"id": doc_id}},
+                        {
+                            "multi_match": {
+                                "query": query,
+                                "fields": ["title^2", "text"],
+                                "type": "best_fields",
+                            }
+                        },
                     ]
                 }
             },
-            # highlighter extracts top fragments by score
             "highlight": {
                 "order": "score",
                 "fields": {
@@ -606,14 +938,13 @@ class OpenSearchSearch:
                         "type": "unified",
                         "fragment_size": fragment_size,
                         "number_of_fragments": per_id,
-                        "no_match_size": fragment_size,  # fallback if no term hits
+                        "no_match_size": fragment_size,
                         "pre_tags": ["<em>"],
                         "post_tags": ["</em>"],
                     }
-                }
+                },
             },
-            # optional: fetch the _score and only a small part of _source
-            "_source": {"includes": ["id", "title", "download_url"]},
+            "_source": {"includes": ["id", "title", "case_year", "download_url", "s3_file_key"]},
         }
 
         res = client.search(index=target_index, body=body)
@@ -624,24 +955,24 @@ class OpenSearchSearch:
         hit = hits[0]
         frags = hit.get("highlight", {}).get("text", []) or []
 
-        # Build normalized passages
         passages = []
         for i, frag in enumerate(frags[:per_id]):
-            # Lazily presign S3 URLs if missing
-            dl_url = hit.get("_source", {}).get("download_url")
+            source = hit.get("_source", {})
+            dl_url = source.get("download_url")
             if not dl_url and getattr(settings, "S3_PRESIGN_ON_QUERY", True):
-                dl_url = self._presign_by_id(doc_id)
-            passages.append({
-                "doc_id": doc_id,
-                "rank": i + 1,
-                "passage": frag,      # contains <em> .. </em> around matched terms
-                "approx_tokens": fragment_size // chars_per_token,
-                "score": float(hit.get("_score") or 0.0),
-                "title": hit.get("_source", {}).get("title", ""),
-                "download_url": dl_url,
-            })
+                dl_url = self._presign_key(source.get("s3_file_key")) or self._presign_by_id(doc_id)
+            passages.append(
+                {
+                    "doc_id": doc_id,
+                    "rank": i + 1,
+                    "passage": frag,
+                    "approx_tokens": fragment_size // chars_per_token,
+                    "score": float(hit.get("_score") or 0.0),
+                    "title": hit.get("_source", {}).get("title", ""),
+                    "download_url": dl_url,
+                }
+            )
 
-        # If the highlighter produced nothing (rare), fallback to the beginning of the doc
         if not passages:
             print("[OpenSearch] Highlighter returned no passages; only returning snippet of document.")
             doc = self.get_document_by_id(space, doc_id)
@@ -649,18 +980,19 @@ class OpenSearchSearch:
                 return []
             text = doc.get("text", "") or ""
             snippet = text[:fragment_size]
-            passages = [{
-                "doc_id": doc_id,
-                "rank": 1,
-                "passage": snippet,
-                "approx_tokens": fragment_size // chars_per_token,
-                "score": 0.0,
-                "title": doc.get("title", ""),
-                "download_url": doc.get("download_url"),
-            }]
+            passages = [
+                {
+                    "doc_id": doc_id,
+                    "rank": 1,
+                    "passage": snippet,
+                    "approx_tokens": fragment_size // chars_per_token,
+                    "score": 0.0,
+                    "title": doc.get("title", ""),
+                    "download_url": doc.get("download_url"),
+                }
+            ]
 
         return passages
 
 
 opensearch_engine = OpenSearchSearch()
-

@@ -1,49 +1,168 @@
 import { useState, useEffect } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
 import { apiFetch } from "@/hooks/useApi";
+import { DEFAULT_SPACE } from "@/hooks/useSpaces";
+import { supabase } from "@/lib/supabaseClient";
 import SpaceSelect  from "@/components/SpaceSelect";
+import SearchResultCard from "@/components/SearchResultCard";
+import { useChatContextDocuments } from "@/context/ChatContextDocuments";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Search as SearchIcon } from "lucide-react";
 
+const SEARCH_STATE_KEY = "encuentra.searchState";
+const SEARCH_FEEDBACK_KEY = "encuentra.searchFeedback";
 
-// Base URL for backend API (used to build absolute download links)
-const API_BASE = (import.meta.env.VITE_API_BASE || "http://localhost:8000").replace(/\/+$/, "");
+function searchFeedbackKey(context, docId) {
+  if (!context?.queryText || !context?.space || !docId) return null;
+  return [context.space, context.queryText.trim(), docId]
+    .map((part) => encodeURIComponent(String(part)))
+    .join("|");
+}
 
-// Convert OpenSearch highlight tags <em>...</em> to React nodes with <strong>...
-function renderEmAsStrong(snippet) {
-  const parts = snippet.split(/(<em>.*?<\/em>)/g);
-  return parts.map((part, idx) => {
-    const m = part.match(/^<em>(.*?)<\/em>$/);
-    if (m) return <b key={idx}>{m[1]}</b>;
-    return <span key={idx}>{part}</span>;
-  });
+function loadStoredFeedback() {
+  try {
+    const raw = window.localStorage.getItem(SEARCH_FEEDBACK_KEY);
+    return raw ? JSON.parse(raw) : {};
+  } catch {
+    return {};
+  }
+}
+
+function saveStoredFeedback(context, docId, positive) {
+  const key = searchFeedbackKey(context, docId);
+  if (!key) return;
+  try {
+    const stored = loadStoredFeedback();
+    stored[key] = positive;
+    window.localStorage.setItem(SEARCH_FEEDBACK_KEY, JSON.stringify(stored));
+  } catch {
+    // Feedback is still saved server-side even if browser storage is unavailable.
+  }
+}
+
+function storedFeedbackForResults(context, results) {
+  if (!context || !Array.isArray(results) || results.length === 0) return {};
+  const stored = loadStoredFeedback();
+  return results.reduce((acc, result) => {
+    const key = searchFeedbackKey(context, result.id);
+    if (key && typeof stored[key] === "boolean") {
+      acc[result.id] = stored[key];
+    }
+    return acc;
+  }, {});
+}
+
+function defaultSearchState() {
+  return {
+    q: "",
+    space: DEFAULT_SPACE,
+    topK: "10",
+    year: "",
+    searchContext: null,
+    results: [],
+    searched: false,
+  };
+}
+
+function loadSearchStateForRestore(shouldRestore) {
+  try {
+    if (!shouldRestore) {
+      return defaultSearchState();
+    }
+    const raw = window.sessionStorage.getItem(SEARCH_STATE_KEY);
+    if (!raw) return defaultSearchState();
+    const parsed = JSON.parse(raw);
+    return {
+      ...defaultSearchState(),
+      ...parsed,
+      results: Array.isArray(parsed.results) ? parsed.results : [],
+      searchContext: parsed.searchContext || null,
+      searched: Boolean(parsed.searched),
+      topK: parsed.topK ? String(parsed.topK) : "10",
+    };
+  } catch {
+    return defaultSearchState();
+  }
+}
+
+function saveSearchState(state) {
+  try {
+    window.sessionStorage.setItem(SEARCH_STATE_KEY, JSON.stringify(state));
+  } catch {
+    // Search remains usable even when session storage is unavailable.
+  }
 }
 
 export default function Search() {
-  const [q, setQ]           = useState("");
-  const [_spaces, setSpaces] = useState([]);
-  const [space, setSpace]   = useState("");
-  const [results, setResults] = useState([]);
-  const [searched, setSearched] = useState(false);
+  const navigate = useNavigate();
+  const location = useLocation();
+  const { addDocument, isSelected } = useChatContextDocuments();
+  const [initialSearchState] = useState(() => {
+    const restored = loadSearchStateForRestore(Boolean(location.state?.restoreSearchState));
+    return {
+      ...restored,
+      q: typeof location.state?.landingQuery === "string" ? location.state.landingQuery : restored.q,
+    };
+  });
+  const [q, setQ]           = useState(initialSearchState.q);
+  const [space, setSpace]   = useState(initialSearchState.space);
+  const [topK, setTopK] = useState(initialSearchState.topK);
+  const [year, setYear] = useState(initialSearchState.year);
+  const [searchContext, setSearchContext] = useState(initialSearchState.searchContext);
+  const [results, setResults] = useState(initialSearchState.results);
+  const [searched, setSearched] = useState(initialSearchState.searched);
+
   useEffect(() => {
-    apiFetch("user/spaces").then((d) => {
-      const s = d.spaces || [];
-      setSpaces(s);
-      if (s.length > 0) setSpace(s[0]);
-    }).catch((e) => console.error("Failed to fetch spaces", e));
-  }, []);
+    if (!space) return;
+    saveSearchState({ q, space, topK, year, searchContext, results, searched });
+  }, [q, space, topK, year, searchContext, results, searched]);
 
   const [loading, setLoading] = useState(false);
   const [feedbackById, setFeedbackById] = useState({});
   const [toast, setToast] = useState({ docId: null, msg: "" });
 
+  useEffect(() => {
+    setFeedbackById(storedFeedbackForResults(searchContext, results));
+  }, [searchContext, results]);
+
   const onSearch = async () => {
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+    if (!session) {
+      navigate("/signup");
+      return;
+    }
     if (!q.trim()) return;
     setLoading(true);
     setSearched(true);
     try {
-      const res = await apiFetch(
-        "search",
-        `?q=${encodeURIComponent(q)}&space=${space}`
-      );
-      setResults(res.results || []);
+      const params = new URLSearchParams({
+        q,
+        space,
+        top_k: topK,
+      });
+      if (year.trim()) params.set("year", year.trim());
+      const res = await apiFetch("search", `?${params.toString()}`);
+      const nextResults = res.results || [];
+      const nextSearchContext = {
+        queryLogId: res.query_log_id || null,
+        queryText: q,
+        space,
+        topK: Number(topK),
+        yearFilter: year.trim() ? Number(year.trim()) : null,
+      };
+      setResults(nextResults);
+      setSearchContext(nextSearchContext);
+      setFeedbackById(storedFeedbackForResults(nextSearchContext, nextResults));
     } catch (err) {
       console.error("Search error:", err);
       alert("Search failed. Check console.");
@@ -52,118 +171,148 @@ export default function Search() {
     }
   };
 
-  const sendFeedback = async (docId, positive) => {
-    // stub: you'll wire this up to /feedback later
+  const sendFeedback = async (result, rank, positive) => {
+    const docId = result.id;
+    const context = searchContext || {
+      queryLogId: null,
+      queryText: q,
+      space,
+      topK: Number(topK),
+      yearFilter: year.trim() ? Number(year.trim()) : null,
+    };
+
     setFeedbackById((f) => ({ ...f, [docId]: positive }));
     setToast({ docId, msg: positive ? "Gracias por su feedback!" : "Gracias, vamos a mejorar!" });
-    setTimeout(() => setToast({ docId: null, msg: "" }), 2000);
+    try {
+      await apiFetch("search-feedback", "", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          query_log_id: context.queryLogId,
+          query_text: context.queryText,
+          space: context.space,
+          top_k: context.topK,
+          year_filter: context.yearFilter,
+          doc_id: docId,
+          rank,
+          score: result.score ?? null,
+          title: result.title ?? null,
+          snippet: result.snippet ?? null,
+          feedback: positive ? "positive" : "negative",
+          metadata: {
+            case_year: result.case_year ?? null,
+            metadata_status: result.metadata_status ?? null,
+          },
+        }),
+      });
+      saveStoredFeedback(context, docId, positive);
+    } catch (err) {
+      console.error("Feedback error:", err);
+      setFeedbackById((f) => {
+        const next = { ...f };
+        delete next[docId];
+        return next;
+      });
+      setToast({ docId, msg: "No se pudo guardar el feedback." });
+    } finally {
+      setTimeout(() => setToast({ docId: null, msg: "" }), 2000);
+    }
   };
 
   return (
-    <div className="w-full flex-1 overflow-y-auto min-h-0 space-y-4 px-16 py-8">
-      <h2 className="text-2xl font-semibold mb-4">Buscar casos</h2>
+    <div className="w-full flex-1 overflow-y-auto min-h-0 px-4 py-6 sm:px-6 lg:px-16 lg:py-8">
+      <div className="mx-auto w-full max-w-6xl space-y-4">
+        <h2 className="text-2xl font-semibold">Buscar casos</h2>
 
-      <div className="flex items-center mb-6 space-x-4">
-        <SpaceSelect
-          value={space}
-          onChange={(v) => setSpace(v)}
-            className="focus:outline-none" 
-          // className="h-11 px-4 bg-transparent transition rounded-2xl hover:bg-gray-50 hover:cursor-pointer focus:outline-none ring-0 focus-visible:ring-0 [aria-expanded=true]:ring-0 border border-transparent hover:border-inherit"
-        />
-        <div className={`input-wrapper flex-grow relative ${q ? 'caret-hidden' : ''}`}>
-          <input
-            type="text"
-            className="flex-grow w-full py-3 px-4 border rounded-2xl
-                              focus:outline-none focus:placeholder-transparent
-                              hover:bg-gray-50 transition-colors"
+        <div className="mb-6 grid gap-3 rounded-lg border border-gray-200 bg-white p-3 shadow-sm sm:p-4 lg:flex lg:items-end lg:gap-4">
+          <div className="min-w-0 lg:w-72 lg:shrink-0">
+            <SpaceSelect
+              value={space}
+              onChange={(v) => setSpace(v)}
+              className="h-11 w-full rounded-xl"
+            />
+          </div>
+          <Input
+            type="search"
+            className="h-11 min-w-0 rounded-xl bg-background px-4 text-base shadow-sm focus-visible:border-gray-300 focus-visible:ring-0 md:text-sm lg:flex-1"
             placeholder="Ingresa las palabras de tu búsqueda..."
             value={q}
             onChange={(e) => setQ(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && onSearch()}
           />
+          <div className="grid grid-cols-2 gap-3 lg:contents">
+            <label className="flex items-center gap-2 text-sm text-gray-600 lg:w-32 lg:shrink-0">
+              <span className="shrink-0">Año</span>
+              <Input
+                type="number"
+                inputMode="numeric"
+                min="1800"
+                max="2100"
+                className="h-11 min-w-0 flex-1 rounded-xl bg-background px-3 text-sm shadow-sm focus-visible:border-gray-300 focus-visible:ring-0"
+                placeholder="Todos"
+                value={year}
+                onChange={(e) => setYear(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && onSearch()}
+              />
+            </label>
+            <label className="flex items-center gap-2 text-sm text-gray-600 lg:w-40 lg:shrink-0">
+              <span className="shrink-0">Mostrar</span>
+              <Select value={topK} onValueChange={setTopK}>
+                <SelectTrigger className="h-11 min-w-0 flex-1 rounded-xl">
+                  <SelectValue aria-label={`${topK} resultados`} />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="10">10</SelectItem>
+                  <SelectItem value="20">20</SelectItem>
+                  <SelectItem value="50">50</SelectItem>
+                </SelectContent>
+              </Select>
+            </label>
+          </div>
+          <Button
+            type="button"
+            onClick={onSearch}
+            disabled={loading}
+            variant="secondary"
+            className="h-11 w-full rounded-xl bg-gray-200 px-6 text-gray-950 hover:bg-gray-300 sm:w-auto lg:min-w-32"
+          >
+            <SearchIcon className="h-4 w-4" aria-hidden="true" />
+            {loading ? "Buscando..." : "Buscar"}
+          </Button>
         </div>
-        <button
-          onClick={onSearch}
-          className="px-8 py-3 bg-gray-200 text-gray-900 rounded-3xl hover:bg-gray-300 transition"
-          disabled={loading}
-        >
-          {loading ? "Buscando..." : "Buscar"}
-        </button>
-      </div>
 
-      <ul className="space-y-4">
+        <div className="space-y-4">
+          {/* ---------- 1) empty state ---------- */}
+          {searched && !loading && results.length === 0 && (
+            <div className="text-gray-500 italic px-2">
+              No se encontraron resultados.
+            </div>
+          )}
 
-        {/* ---------- 1) empty state ---------- */}
-        {searched && !loading && results.length === 0 && (
-          <li className="text-gray-500 italic px-2">
-            No se encontraron resultados.
-          </li>
-        )}
+          {/* ---------- 2) actual hits ---------- */}
+          {results.map((res, index) => {
+            const fb = feedbackById[res.id];
+            const isToast = toast.docId === res.id;
 
-        {/* ---------- 2) actual hits ---------- */}
-        {results.map((res) => {
-          const fb = feedbackById[res.id];
-          const isToast = toast.docId === res.id;
-
-          return (
-            <li
-              key={res.id}
-              className="p-4 border rounded-lg hover:shadow flex flex-col"
-            >
-              <div className="relative">
-                <div className="flex justify-between items-center">
-                  <h3 className="text-lg font-semibold">{res.title}</h3>
-                  <span className="text-sm font-mono text-gray-500">
-                    ID: {res.id}
-                  </span>
-                </div>
-                <span className="text-sm font-semibold text-indigo-600">
-                  Score: {res.score.toFixed(3)}
-                </span>
-
-                <p className="mt-2 text-gray-700 text-sm">
-                  {renderEmAsStrong(res.snippet)}
-                  {res.snippet.split(" ").length >= 50 ? "…" : ""}
-                </p>
-
-                <div className="mt-3 flex items-center space-x-2">
-                  {res.download_url && (
-                    <a
-                      href={new URL(res.download_url, API_BASE).toString()}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="px-4 py-2 bg-gray-200 rounded hover:bg-gray-100"
-                    >
-                      Download Full Case
-                    </a>
-                  )}
-                  <div className="absolute bottom-2 right-2 flex space-x-2">
-                    <button
-                      onClick={() => sendFeedback(res.id, true)}
-                      disabled={fb != null}
-                      className={`p-1 rounded-full transition ${
-                        fb === true ? "bg-green-200 text-green-800" : "hover:bg-green-100 text-gray-600"
-                      }`}
-                      >
-                      👍
-                    </button>
-                    <button
-                      onClick={() => sendFeedback(res.id, false)}
-                      disabled={fb != null}
-                      className={`p-1 rounded-full transition ${
-                        fb === false ? "bg-red-200 text-red-800" : "hover:bg-red-100 text-gray-600"
-                      }`}
-                      >
-                      👎
-                    </button>
-                  </div>
-                </div>
-
+            return (
+              <div
+                key={res.id}
+                className="relative"
+              >
+                <SearchResultCard
+                  result={res}
+                  space={space}
+                  feedback={fb}
+                  onFeedback={(_docId, positive) => sendFeedback(res, index + 1, positive)}
+                  onAddToChat={addDocument}
+                  onOpenChat={() => navigate("/chat")}
+                  isInChatContext={isSelected(space, res.id)}
+                />
                 {isToast && (
                   <div
                     className="
-                      absolute 
-                      bottom-10 right-2      /* position above the buttons */
+                      absolute
+                      bottom-12 right-4
                       bg-white border border-gray-300
                       text-gray-800
                       px-3 py-1
@@ -175,10 +324,10 @@ export default function Search() {
                   </div>
                 )}
               </div>
-            </li>
-          );
-        })}
-      </ul>
+            );
+          })}
+        </div>
+      </div>
     </div>
   );
 }

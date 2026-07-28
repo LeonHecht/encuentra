@@ -18,6 +18,7 @@ export default function App() {
           <Route path="/chat"    element={<Chat />} />
           <Route path="/uploads" element={<Uploads />} />
           <Route path="/login"   element={<AuthPage />} />
+          <Route path="/signup"  element={<AuthPage initialView="sign_up" />} />
         </Routes>
       </main>
       {/* <footer className="text-center py-1 text-xs text-gray-500 border-t">

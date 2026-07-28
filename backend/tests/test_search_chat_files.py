@@ -23,6 +23,10 @@ from starlette.datastructures import UploadFile
 # These tests now target the OpenSearch backend (default in settings).
 
 
+def _chat_user():
+    return auth.UserData(user_id="user-1", username="alice", spaces=["personal"])
+
+
 @pytest.fixture()
 def test_env(tmp_path, monkeypatch):
     """Prepare temp dirs, reset databases and index a small document."""
@@ -100,6 +104,71 @@ def test_search_basic(test_env):
     assert hit.score > 0
 
 
+def test_chat_search_cases_passes_exact_year_filter(monkeypatch):
+    captured = {}
+
+    def fake_search(**kwargs):
+        captured.update(kwargs)
+        return []
+
+    monkeypatch.setattr(chat_ep.search_engine, "search", fake_search)
+
+    chat_ep.search_cases(
+        query="hurto",
+        space="supreme_court",
+        filters={"year_from": 1995, "year_to": 1995},
+        top_k=5,
+    )
+
+    assert captured["query"] == "hurto"
+    assert captured["space"] == "supreme_court"
+    assert captured["top_k"] == 5
+    assert captured["year"] == 1995
+
+
+def test_chat_fetch_passages_citations_keep_download_metadata(monkeypatch):
+    def fake_fetch_passages(**kwargs):
+        return [
+            {
+                "doc_id": "case-1",
+                "passage": "Fragmento relevante",
+                "title": "Sentencia relevante",
+                "download_url": "https://example.com/case-1.pdf",
+            }
+        ]
+
+    monkeypatch.setattr(chat_ep.search_engine, "fetch_passages", fake_fetch_passages)
+
+    ctx = chat_ep.AgentContext(space="supreme_court", last_user_msg="consulta")
+    chat_ep.run_tool(ctx, "fetch_passages", {"ids": ["case-1"]})
+
+    citations = chat_ep.dedupe_citations(ctx.citations)
+
+    assert citations == [
+        {
+            "doc_id": "case-1",
+            "snippet": "Fragmento relevante",
+            "title": "Sentencia relevante",
+            "download_url": "https://example.com/case-1.pdf",
+        }
+    ]
+
+
+def test_stream_rejects_inaccessible_space(monkeypatch):
+    monkeypatch.setattr(chat_ep, "get_accessible_spaces", lambda user: ["personal"])
+
+    req = chat_ep.AgenticChatRequest(
+        space="other-space",
+        messages=[{"role": "user", "content": "Hola"}],
+    )
+
+    with pytest.raises(chat_ep.HTTPException) as exc:
+        asyncio.run(chat_ep.chat_agentic_stream(req, user=_chat_user()))
+
+    assert exc.value.status_code == 403
+    assert exc.value.detail == "Space not accessible"
+
+
 def test_file_upload_creates_file_and_indexes(test_env, monkeypatch):
     user = test_env
     uploaded = UploadFile(filename="new.txt", file=io.BytesIO(b"some content"))
@@ -115,3 +184,184 @@ def test_file_upload_creates_file_and_indexes(test_env, monkeypatch):
     path = Path(settings.DATA_UPLOAD) / "alice" / "personal" / saved
     assert path.exists()
     assert indexed == ["alice/personal"]
+
+
+def test_stream_emits_progress_before_tool_execution(monkeypatch):
+    monkeypatch.setattr(chat_ep, "get_accessible_spaces", lambda user: ["personal"])
+
+    class FakeStream:
+        def __init__(self, events):
+            self.events = events
+
+        def __iter__(self):
+            return iter(self.events)
+
+        def close(self):
+            pass
+
+    tool_item = SimpleNamespace(
+        type="function_call",
+        name="emit_event",
+        arguments='{"message":"Voy a consultar los datos"}',
+        call_id="call_1",
+    )
+
+    class FakeResponsesAPI:
+        def create(self, **kwargs):
+            has_tool_output = any(
+                isinstance(item, dict) and item.get("type") == "function_call_output"
+                for item in kwargs.get("input", [])
+            )
+            if has_tool_output:
+                return FakeStream([
+                    SimpleNamespace(type="response.output_text.delta", delta="Listo"),
+                    SimpleNamespace(type="response.output_text.done", text="Listo"),
+                    SimpleNamespace(type="response.completed"),
+                ])
+            return FakeStream([
+                SimpleNamespace(type="response.output_item.done", output_index=0, item=tool_item),
+                SimpleNamespace(type="response.completed"),
+            ])
+
+    fake_client = SimpleNamespace(responses=FakeResponsesAPI())
+    monkeypatch.setattr(chat_ep, "get_openai_client", lambda: fake_client)
+    monkeypatch.setattr(chat_ep, "run_tool", lambda ctx, tool_name, tool_args: '{"ok": true}')
+    monkeypatch.setattr(chat_ep, "get_title_for_chat", lambda last_user_msg: "Test")
+
+    async def collect_stream():
+        req = chat_ep.AgenticChatRequest(
+            space="personal",
+            messages=[{"role": "user", "content": "Analiza ventas"}],
+        )
+        response = await chat_ep.chat_agentic_stream(req, user=_chat_user())
+        chunks = []
+        async for chunk in response.body_iterator:
+            chunks.append(chunk.decode("utf-8"))
+        return "".join(chunks)
+
+    body = asyncio.run(collect_stream())
+
+    assert "event: response.emit_message" in body
+    assert "Voy a consultar los datos" in body
+    assert body.index("Voy a consultar los datos") < body.index("Listo")
+
+
+def test_stream_converts_plain_emit_event_json_to_progress(monkeypatch):
+    monkeypatch.setattr(chat_ep, "get_accessible_spaces", lambda user: ["personal"])
+
+    class FakeStream:
+        def __init__(self, events):
+            self.events = events
+
+        def __iter__(self):
+            return iter(self.events)
+
+        def close(self):
+            pass
+
+    calls = {"count": 0}
+
+    class FakeResponsesAPI:
+        def create(self, **kwargs):
+            calls["count"] += 1
+            if calls["count"] == 1:
+                text = '{"kind":"decision","message":"Revisaré el esquema"}'
+                return FakeStream([
+                    SimpleNamespace(type="response.output_text.delta", delta=text[:20]),
+                    SimpleNamespace(type="response.output_text.delta", delta=text[20:]),
+                    SimpleNamespace(type="response.output_text.done", text=text),
+                    SimpleNamespace(type="response.completed"),
+                ])
+            return FakeStream([
+                SimpleNamespace(type="response.output_text.delta", delta="El promedio es 42%."),
+                SimpleNamespace(type="response.output_text.done", text="El promedio es 42%."),
+                SimpleNamespace(type="response.completed"),
+            ])
+
+    fake_client = SimpleNamespace(responses=FakeResponsesAPI())
+    monkeypatch.setattr(chat_ep, "get_openai_client", lambda: fake_client)
+    monkeypatch.setattr(chat_ep, "get_title_for_chat", lambda last_user_msg: "Test")
+
+    async def collect_stream():
+        req = chat_ep.AgenticChatRequest(
+            space="personal",
+            messages=[{"role": "user", "content": "Promedio por país"}],
+        )
+        response = await chat_ep.chat_agentic_stream(req, user=_chat_user())
+        chunks = []
+        async for chunk in response.body_iterator:
+            chunks.append(chunk.decode("utf-8"))
+        return "".join(chunks)
+
+    body = asyncio.run(collect_stream())
+
+    assert "event: response.emit_message" in body
+    assert "Revisaré el esquema" in body
+    assert "event: response.output_text.delta" in body
+    assert "El promedio es 42%." in body
+    assert '{"kind":"decision"' not in body
+
+
+def test_stream_emits_progress_when_tool_call_item_is_added(monkeypatch):
+    monkeypatch.setattr(chat_ep, "get_accessible_spaces", lambda user: ["personal"])
+
+    class FakeStream:
+        def __init__(self, events):
+            self.events = events
+
+        def __iter__(self):
+            return iter(self.events)
+
+        def close(self):
+            pass
+
+    tool_item = SimpleNamespace(
+        type="function_call",
+        name="search_cases",
+        arguments="",
+        call_id="call_1",
+    )
+
+    class FakeResponsesAPI:
+        def create(self, **kwargs):
+            has_tool_output = any(
+                isinstance(item, dict) and item.get("type") == "function_call_output"
+                for item in kwargs.get("input", [])
+            )
+            if has_tool_output:
+                return FakeStream([
+                    SimpleNamespace(type="response.output_text.delta", delta="Resultado final"),
+                    SimpleNamespace(type="response.output_text.done", text="Resultado final"),
+                    SimpleNamespace(type="response.completed"),
+                ])
+            return FakeStream([
+                SimpleNamespace(type="response.output_item.added", output_index=0, item=tool_item),
+                SimpleNamespace(type="response.function_call_arguments.delta", output_index=0, delta='{"query":"hábeas corpus"'),
+                SimpleNamespace(type="response.function_call_arguments.delta", output_index=0, delta="}"),
+                SimpleNamespace(type="response.function_call_arguments.done", output_index=0, arguments='{"query":"hábeas corpus"}'),
+                SimpleNamespace(type="response.output_item.done", output_index=0, item=tool_item),
+                SimpleNamespace(type="response.completed"),
+            ])
+
+    fake_client = SimpleNamespace(responses=FakeResponsesAPI())
+    monkeypatch.setattr(chat_ep, "get_openai_client", lambda: fake_client)
+    monkeypatch.setattr(chat_ep, "run_tool", lambda ctx, tool_name, tool_args: '[{"id": "1"}]')
+    monkeypatch.setattr(chat_ep, "get_title_for_chat", lambda last_user_msg: "Test")
+
+    async def collect_stream():
+        req = chat_ep.AgenticChatRequest(
+            space="personal",
+            messages=[{"role": "user", "content": "Busca jurisprudencia"}],
+        )
+        response = await chat_ep.chat_agentic_stream(req, user=_chat_user())
+        chunks = []
+        async for chunk in response.body_iterator:
+            chunks.append(chunk.decode("utf-8"))
+        return "".join(chunks)
+
+    body = asyncio.run(collect_stream())
+
+    assert "event: response.emit_message" in body
+    assert "Buscando documentos relevantes" in body
+    assert body.count("Buscando documentos relevantes") == 1
+    assert body.index("Buscando documentos relevantes") < body.index("Resultado final")

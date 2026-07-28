@@ -254,7 +254,7 @@ export default function ChatSidebar({
           <span className="font-semibold">Chats</span>
           <div className="flex items-center gap-2">
             {/* Removed reload button as requested */}
-            <Button size="sm" onClick={createChat} disabled={loading}>
+            <Button size="sm" onClick={createChat} disabled={loading} className="rounded-xl">
               + Nuevo
             </Button>
           </div>

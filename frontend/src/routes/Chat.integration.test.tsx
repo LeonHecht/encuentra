@@ -22,7 +22,12 @@ vi.mock('@/lib/supabaseClient', () => {
     order() { return Promise.resolve({ data: [], error: null }) },
     eq() { return this },
     single() { return Promise.resolve({ data: table === 'chats' ? { id: 'chat1', agent_state: null } : { agent_state: null }, error: null }) },
-    insert() { if (table === 'chats') { return { select: () => ({ single: () => Promise.resolve({ data: { id: 'chat1', title: 't' }, error: null }) }) } } return Promise.resolve({ data: null, error: null }) },
+    insert() {
+      if (table === 'chats') {
+        return { select: () => ({ single: () => Promise.resolve({ data: { id: 'chat1', title: 't' }, error: null }) }) }
+      }
+      return { select: () => ({ single: () => Promise.resolve({ data: { id: `msg-${Date.now()}` }, error: null }) }) }
+    },
     update() { return Promise.resolve({ data: null, error: null }) },
     delete() { return Promise.resolve({ data: null, error: null }) },
   })
@@ -30,7 +35,7 @@ vi.mock('@/lib/supabaseClient', () => {
     supabase: {
       auth: {
         getUser: vi.fn().mockResolvedValue({ data: { user: { id: 'u1' } } }),
-        getSession: vi.fn().mockResolvedValue({ data: { session: null } }),
+        getSession: vi.fn().mockResolvedValue({ data: { session: { access_token: 'test-token' } } }),
       },
       from: (table: string) => builder(table),
     },

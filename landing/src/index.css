@@ -1,7 +1,64 @@
+@import url('https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap');
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
 @layer base {
-  body { font-family: Inter, sans-serif; }
+  body {
+    font-family: 'Manrope', ui-sans-serif, system-ui, sans-serif;
+    font-optical-sizing: auto;
+  }
+}
+
+.hero-parallax {
+  opacity: var(--hero-opacity, 1);
+  transform:
+    translate3d(0, var(--hero-shift, 0), 0)
+    scale(var(--hero-scale, 1));
+  transform-origin: center;
+  will-change: transform, opacity;
+}
+
+.scroll-reveal {
+  opacity: 0;
+  filter: blur(10px);
+  transform: translate3d(0, 56px, 0);
+  transition:
+    opacity 800ms cubic-bezier(0.22, 1, 0.36, 1),
+    filter 800ms cubic-bezier(0.22, 1, 0.36, 1),
+    transform 900ms cubic-bezier(0.22, 1, 0.36, 1);
+  transition-delay: var(--reveal-delay, 0ms);
+  will-change: transform, opacity, filter;
+}
+
+.scroll-reveal--left {
+  transform: translate3d(-64px, 24px, 0);
+}
+
+.scroll-reveal--right {
+  transform: translate3d(64px, 24px, 0);
+}
+
+.scroll-reveal--scale {
+  transform: translate3d(0, 40px, 0) scale(0.96);
+}
+
+.scroll-reveal.is-visible {
+  opacity: 1;
+  filter: blur(0);
+  transform: translate3d(0, 0, 0) scale(1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hero-parallax,
+  .scroll-reveal,
+  .scroll-reveal--left,
+  .scroll-reveal--right,
+  .scroll-reveal--scale {
+    opacity: 1;
+    filter: none;
+    transform: none;
+    transition: none;
+  }
 }
