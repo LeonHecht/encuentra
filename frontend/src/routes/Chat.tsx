@@ -930,7 +930,7 @@ export default function Chat() {
               onSubmit={handleSubmit}
               onStop={stopStreaming}
               status={status}
-              disabled={status === "submitted" || (status !== "streaming" && (!text || !space))}
+              disabled={status === "submitted" || !space}
               placeholder="Pregunta lo que quieras"
             />
             <p className="mt-2 text-center text-xs text-gray-500">

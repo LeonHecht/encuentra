@@ -96,7 +96,7 @@ export default function ExpandingPromptInput({
         <PromptInputTools />
         <PromptInputSubmit
           className="rounded-full"
-          disabled={disabled}
+          disabled={disabled || (status !== "streaming" && !value.trim())}
           status={status}
           onClick={(event) => {
             if (status === "streaming") {
