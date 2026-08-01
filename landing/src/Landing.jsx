@@ -345,7 +345,7 @@ export default function Landing() {
             </div>
           </div>
         </section>
-
+        {/* hi */}
         <section className="bg-[#484848] px-5 text-white sm:px-8">
           <div className="mx-auto w-full max-w-7xl pb-8 pt-24 sm:pt-32">
             <ScrollReveal>
