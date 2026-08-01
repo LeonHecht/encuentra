@@ -349,12 +349,8 @@ export default function Landing() {
         <section className="bg-[#484848] px-5 text-white sm:px-8">
           <div className="mx-auto w-full max-w-7xl pb-8 pt-24 sm:pt-32">
             <ScrollReveal>
-              <div className="grid gap-10 pt-16 sm:pt-24 lg:grid-cols-[1fr_auto] lg:items-end">
+              <div className="grid pt-16 sm:pt-24 lg:grid-cols-[1fr_auto]">
                 <div>
-                  <div className="mb-6 flex items-center gap-2 text-xs font-bold uppercase tracking-[0.18em] text-neutral-400">
-                    <Check className="h-4 w-4" />
-                    Investigación con respaldo documental
-                  </div>
                   <h2 className="max-w-4xl text-4xl font-semibold leading-[1.04] tracking-[-0.045em] sm:text-6xl">
                     La investigación rigurosa también puede ser más ágil.
                   </h2>
