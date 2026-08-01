@@ -148,7 +148,7 @@ function ChatRoutePreview() {
     <div className="overflow-hidden rounded-2xl border border-gray-200 bg-[#F5F5F7] shadow-xl shadow-gray-200/70">
       <div className="flex min-h-[640px] flex-col overflow-hidden">
         <div className="flex items-center gap-4 p-4">
-          <div className="flex h-9 w-9 items-center justify-center rounded-xl border border-gray-200 bg-white text-gray-700 shadow-sm">
+          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-gray-200 bg-white text-gray-700 shadow-sm">
             <span className="h-4 w-4 rounded border-y-2 border-gray-500" />
           </div>
           <div className="ml-1 flex h-11 w-80 max-w-[55%] items-center rounded-xl border border-gray-200 bg-white px-3 text-sm text-gray-900 shadow-sm">
@@ -249,13 +249,13 @@ function ChatRoutePreview() {
 
 export default function Landing() {
   return (
-    <div className="min-h-screen bg-[#f4f4f4] text-gray-950">
-      <div id="inicio" className="relative isolate min-h-screen overflow-hidden">
+    <div className="min-h-[100svh] overflow-x-clip bg-[#f4f4f4] text-gray-950">
+      <div id="inicio" className="relative isolate min-h-[100svh] overflow-hidden">
         <BackgroundVideo />
         <div className="relative z-10">
           <Navbar />
 
-          <section className="relative flex min-h-[calc(100vh-72px)] flex-col items-center justify-center px-4 pb-28 pt-16">
+          <section className="relative flex min-h-[calc(100svh-72px)] flex-col items-center justify-center px-4 pb-28 pt-16">
             <HeroParallax className="flex w-full max-w-3xl flex-col gap-8">
               <div className="space-y-2 text-center">
                 <h1 className="text-6xl font-bold tracking-tight md:text-6xl">
@@ -276,7 +276,7 @@ export default function Landing() {
 
             <a
               href="#cobertura"
-              className="group absolute bottom-7 left-1/2 flex -translate-x-1/2 flex-col items-center gap-2 text-[10px] font-bold uppercase tracking-[0.22em] text-neutral-700 transition-colors hover:text-black"
+              className="group absolute bottom-5 left-1/2 flex -translate-x-1/2 flex-col items-center gap-2 pb-[env(safe-area-inset-bottom)] text-[10px] font-bold uppercase tracking-[0.22em] text-neutral-700 transition-colors hover:text-black"
             >
               Conoce más
               <ChevronDown className="h-5 w-5 transition-transform motion-safe:animate-bounce group-hover:translate-y-1" />
@@ -345,11 +345,11 @@ export default function Landing() {
             </div>
           </div>
         </section>
-
-        <section className="bg-[#282828] px-5 text-white sm:px-8">
+        {/* hi */}
+        <section className="bg-[#484848] px-5 text-white sm:px-8">
           <div className="mx-auto w-full max-w-7xl pb-8 pt-24 sm:pt-32">
             <ScrollReveal>
-              <div className="grid gap-10 border-t border-white/15 pt-16 sm:pt-24 lg:grid-cols-[1fr_auto] lg:items-end">
+              <div className="grid gap-10 pt-16 sm:pt-24 lg:grid-cols-[1fr_auto] lg:items-end">
                 <div>
                   <div className="mb-6 flex items-center gap-2 text-xs font-bold uppercase tracking-[0.18em] text-neutral-400">
                     <Check className="h-4 w-4" />
@@ -370,7 +370,7 @@ export default function Landing() {
               </div>
             </ScrollReveal>
 
-            <footer className="mt-24 flex flex-col gap-3 border-t border-white/10 pt-7 text-xs text-neutral-500 sm:flex-row sm:items-center sm:justify-between">
+            <footer className="mt-24 flex flex-col gap-3 pt-7 text-xs text-neutral-500 sm:flex-row sm:items-center sm:justify-between">
               <span>© 2026 Encuentra</span>
               <span>Tecnología para la práctica jurídica en El Salvador.</span>
             </footer>
