@@ -1,5 +1,5 @@
 import { vi, it, expect, beforeEach } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import React from 'react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
@@ -97,8 +97,7 @@ beforeEach(() => {
 it('loads spaces, performs search, and renders results', async () => {
   render(<MemoryRouter><Search /></MemoryRouter>);
 
-  // After mount, spaces should be loaded and first selected
-  await waitFor(() => expect(screen.getByText('Space: supreme_court')).toBeInTheDocument());
+  expect(screen.queryByText('Space: supreme_court')).not.toBeInTheDocument();
 
   // Type a query and trigger search
   const input = screen.getByPlaceholderText(/Ingresa las palabras/i);
@@ -123,7 +122,7 @@ it('loads spaces, performs search, and renders results', async () => {
 it('expands and collapses legal metadata details', async () => {
   render(<MemoryRouter><Search /></MemoryRouter>);
 
-  await waitFor(() => expect(screen.getByText('Space: supreme_court')).toBeInTheDocument());
+  expect(screen.queryByText('Space: supreme_court')).not.toBeInTheDocument();
   await userEvent.type(screen.getByPlaceholderText(/Ingresa las palabras/i), 'libertad');
   await userEvent.click(screen.getByRole('button', { name: 'Buscar' }));
 

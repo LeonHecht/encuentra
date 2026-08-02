@@ -56,9 +56,6 @@ vi.mock('@/lib/supabaseClient', () => {
   }
 })
 
-// Ensure SpaceSelect (used at top of Chat) is light weight.
-vi.mock('@/components/SpaceSelect', () => ({ default: (props: any) => <select aria-label="space-select" value={props.value} onChange={e => props.onChange(e.target.value)} /> }))
-
 // Mock Sidebar + related UI to avoid Radix complexity for unit tests.
 vi.mock('@/components/ChatSidebar', () => ({ default: (props: any) => <div data-testid="chat-sidebar">Sidebar sel:{props.selectedId || 'none'}</div> }))
 vi.mock('@/components/ui/sidebar', () => ({
@@ -143,6 +140,10 @@ describe('Chat route component', () => {
     // Wait for initial effect (spaces fetch) to settle
     expect(await screen.findByText(/Hola, ¿cómo puedo ayudarte hoy?/)).toBeInTheDocument()
     expect(screen.getByPlaceholderText(/Pregunta lo que quieras/)).toBeInTheDocument()
+    expect(
+      screen.getByText(/Encuentra Chat puede cometer errores/)
+    ).toHaveClass('hidden', 'sm:block')
+    expect(screen.queryByLabelText('space-select')).not.toBeInTheDocument()
   })
 
   it('streams an assistant reply after submitting a user message', async () => {
