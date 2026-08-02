@@ -5,6 +5,7 @@ import {
   ChevronDown,
   FileText,
   Search as SearchIcon,
+  ShieldCheck,
   ThumbsDown,
   ThumbsUp,
   X,
@@ -345,30 +346,79 @@ export default function Landing() {
             </div>
           </div>
         </section>
-        {/* hi */}
-        <section className="bg-[#484848] px-5 text-white sm:px-8">
-          <div className="mx-auto w-full max-w-7xl pb-8 pt-24 sm:pt-32">
-            <ScrollReveal>
-              <div className="grid pt-16 sm:pt-24 lg:grid-cols-[1fr_auto]">
-                <div>
-                  <h2 className="max-w-4xl text-4xl font-semibold leading-[1.04] tracking-[-0.045em] sm:text-6xl">
-                    La investigación rigurosa también puede ser más ágil.
-                  </h2>
+
+        <section id="privacidad" className="flex min-h-[70svh] scroll-mt-20 items-center bg-[#d3d3d3] px-4">
+          <div className="mx-auto w-full max-w-7xl py-16 sm:py-20">
+            <ScrollReveal className="w-full">
+              <div className="grid gap-8 lg:grid-cols-[0.72fr_1.28fr] lg:gap-16">
+                <div className="flex items-start gap-4">
+                  <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-black/15 bg-white/40">
+                    <ShieldCheck className="h-5 w-5 text-gray-800" aria-hidden="true" />
+                  </div>
+                  <p className="pt-3 text-xs font-bold uppercase tracking-[0.2em] text-gray-600">
+                    Privacidad por diseño
+                  </p>
                 </div>
 
-                <a
-                  href="https://staging.encuentra.app/login"
-                  className="group inline-flex h-14 items-center justify-center gap-3 rounded-full bg-white px-7 text-sm font-bold text-neutral-950 transition hover:bg-neutral-200"
-                >
-                  Entrar a Encuentra
-                  <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-1" />
-                </a>
+                <div className="max-w-3xl">
+                  <h2 className="text-3xl font-bold tracking-tight text-gray-950 sm:text-5xl">
+                    Privacidad basada en estándares europeos
+                  </h2>
+                  <p className="mt-6 text-base leading-7 text-gray-600 sm:text-lg">
+                    Diseñado conforme a los principios del RGPD: no vendemos tus datos y no utilizamos tus documentos ni conversaciones para entrenar modelos.
+                  </p>
+                  <a
+                    href="https://staging.encuentra.app/privacy"
+                    className="group mt-8 inline-flex items-center gap-2 text-sm font-semibold text-gray-950"
+                  >
+                    Conoce cómo protegemos tus datos
+                    <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-1" aria-hidden="true" />
+                  </a>
+                </div>
               </div>
             </ScrollReveal>
+          </div>
+        </section>
 
-            <footer className="mt-24 flex flex-col gap-3 pt-7 text-xs text-neutral-500 sm:flex-row sm:items-center sm:justify-between">
+        <section className="min-h-[70svh] bg-[#484848] px-5 text-white sm:px-8">
+          <div className="mx-auto flex min-h-[70svh] w-full max-w-7xl flex-col pb-8">
+            <div className="flex flex-1 items-center py-16 sm:py-20">
+              <ScrollReveal className="w-full">
+                <div className="grid gap-10 lg:grid-cols-[1fr_auto] lg:items-center">
+                  <div>
+                    <h2 className="max-w-4xl text-4xl font-semibold leading-[1.04] tracking-[-0.045em] sm:text-6xl">
+                      La investigación rigurosa también puede ser más ágil.
+                    </h2>
+                  </div>
+
+                  <a
+                    href="https://staging.encuentra.app/login"
+                    className="group inline-flex h-14 items-center justify-center gap-3 rounded-full bg-white px-7 text-sm font-bold text-neutral-950 transition hover:bg-neutral-200"
+                  >
+                    Entrar a Encuentra
+                    <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-1" />
+                  </a>
+                </div>
+              </ScrollReveal>
+            </div>
+
+            <footer className="flex flex-col gap-3 border-t border-white/10 pt-7 text-xs text-neutral-400 sm:flex-row sm:items-center sm:justify-between">
               <span>© 2026 Encuentra</span>
-              <span>Tecnología para la práctica jurídica en El Salvador.</span>
+              <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+                <a
+                  href="https://staging.encuentra.app/privacy"
+                  className="transition hover:text-white"
+                >
+                  Privacidad
+                </a>
+                <a
+                  href="https://staging.encuentra.app/terms"
+                  className="transition hover:text-white"
+                >
+                  Términos
+                </a>
+                <span>Tecnología para la práctica jurídica en El Salvador.</span>
+              </div>
             </footer>
           </div>
         </section>

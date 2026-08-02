@@ -27,7 +27,7 @@ test('guest sees product name', async () => {
       <LandingCmp />
     </MemoryRouter>
   );
-  expect(screen.getByText(/encuentra/i)).toBeInTheDocument();
+  expect(screen.getByRole('heading', { level: 1, name: /encuentra/i })).toBeInTheDocument();
 });
 
 test('user with full_name sees "Hola, First"', async () => {

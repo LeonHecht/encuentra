@@ -58,8 +58,11 @@ export default function SpaceSelect({
   });
 
   return (
-    <Select value={value} onValueChange={onChange} {...rest}>
-      <SelectTrigger className={cn("w-[16rem]", className)}>
+    <Select value={value} onValueChange={onChange} {...rest} disabled>
+      <SelectTrigger
+        aria-readonly="true"
+        className={cn("w-[16rem] disabled:cursor-default disabled:opacity-100", className)}
+      >
         <SelectValue placeholder={placeholder} />
       </SelectTrigger>
       <SelectContent>
