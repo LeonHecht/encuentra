@@ -85,3 +85,9 @@ it('search link requests restoring the previous search', async () => {
     state: { restoreSearchState: true },
   });
 });
+
+it('does not expose the uploads navigation', () => {
+  setup();
+
+  expect(screen.queryByRole('link', { name: /Subir/i })).not.toBeInTheDocument();
+});

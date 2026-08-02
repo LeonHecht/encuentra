@@ -106,9 +106,6 @@ export default function Navbar() {
           <Link to="/chat" className="text-gray-600 hover:text-gray-700">
             Chat
           </Link>
-          <Link to="/uploads" className="text-gray-600 hover:text-gray-700">
-            Subir
-          </Link>
           {user ? (
             <div className="relative" ref={menuRef}>
               <button

@@ -5,8 +5,8 @@ import SpaceSelect from './SpaceSelect';
 
 // Mock the Radix-based select components with simple DOM elements
 vi.mock('@/components/ui/select', () => ({
-  Select: ({ children }) => <div data-testid="select">{children}</div>,
-  SelectTrigger: ({ children }) => <div>{children}</div>,
+  Select: ({ children, disabled }) => <div data-testid="select" data-disabled={disabled}>{children}</div>,
+  SelectTrigger: ({ children, ...props }) => <div {...props}>{children}</div>,
   SelectValue: ({ placeholder }) => <span>{placeholder}</span>,
   SelectContent: ({ children }) => <div>{children}</div>,
   SelectGroup: ({ children }) => <section>{children}</section>,
@@ -46,4 +46,11 @@ test('renders grouped spaces with labels', () => {
 
   // New space option exists when allowCreate
   expect(screen.getByText('➕ New space…')).toBeInTheDocument();
+});
+
+test('is read only', () => {
+  render(<SpaceSelect value="public_corpus" onChange={() => {}} />);
+
+  expect(screen.getByTestId('select')).toHaveAttribute('data-disabled', 'true');
+  expect(screen.getByText('Selecciona un espacio…').parentElement).toHaveAttribute('aria-readonly', 'true');
 });
