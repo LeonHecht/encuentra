@@ -12,8 +12,6 @@ vi.mock('@/components/ai-elements/response', () => ({
 // Route-level integration: mock only external/service boundaries
 vi.mock('@/components/Navbar', () => ({ default: () => <nav>MockNav</nav> }))
 vi.mock('@/components/ChatSidebar', () => ({ default: () => <aside>MockSidebar</aside> }))
-vi.mock('@/components/SpaceSelect', () => ({ default: (props: any) => <select aria-label="space-select" value={props.value} onChange={e => props.onChange(e.target.value)} /> }))
-
 import App from '@/App'
 
 vi.mock('@/lib/supabaseClient', () => {

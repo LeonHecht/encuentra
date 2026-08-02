@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
-import SpaceSelect from "@/components/SpaceSelect";
+// Beta only: the space selector is temporarily disabled. Uncomment this import
+// and the marked JSX below when spaces should be selectable again.
+// import SpaceSelect from "@/components/SpaceSelect";
 import ChatSidebar from "@/components/ChatSidebar";
 import { DEFAULT_SPACE } from "@/hooks/useSpaces";
 import { supabase } from "@/lib/supabaseClient";
@@ -92,7 +94,9 @@ export default function Chat() {
 
   const [title, setTitle] = useState<string>("");
   const [messages, setMessages] = useState<ChatMsg[]>([]);
-  const [space, setSpace] = useState<string>(DEFAULT_SPACE);
+  // Beta only: switch back to the setter version when re-enabling the selector.
+  // const [space, setSpace] = useState<string>(DEFAULT_SPACE);
+  const [space] = useState<string>(DEFAULT_SPACE);
   const [agentState, setAgentState] = useState<string | null>(null);
   const [text, setText] = useState<string>("");
   const [status, setStatus] = useState<"ready" | "submitted" | "streaming">(
@@ -736,14 +740,17 @@ export default function Chat() {
 
       {/* Main content inside the SidebarInset so it accounts for the sidebar gap */}
       <SidebarInset className="flex flex-col flex-1 min-h-0 min-w-0 overflow-hidden bg-[#F5F5F7]">
-        {/* Sidebar toggle + Space selector (sticky below navbar) */}
+        {/* Sidebar toggle + return navigation (sticky below navbar) */}
         <div className="flex items-center gap-4 p-4">
           <SidebarTrigger />
+          {/* Beta only: the space selector is temporarily hidden until spaces
+              are ready to be exposed to users again.
           <SpaceSelect
             value={space}
             onChange={(v) => setSpace(v)}
             className="ml-1 h-11 w-80 rounded-xl"
           />
+          */}
           <Button
             type="button"
             variant="outline"
@@ -933,7 +940,7 @@ export default function Chat() {
               disabled={status === "submitted" || !space}
               placeholder="Pregunta lo que quieras"
             />
-            <p className="mt-2 text-center text-xs text-gray-500">
+            <p className="mt-2 hidden text-center text-xs text-gray-500 sm:block">
               Encuentra Chat puede cometer errores. Se debe comprobar la información importante.
             </p>
           </div>

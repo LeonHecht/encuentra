@@ -3,7 +3,9 @@ import { useLocation, useNavigate } from "react-router-dom";
 import { apiFetch } from "@/hooks/useApi";
 import { DEFAULT_SPACE } from "@/hooks/useSpaces";
 import { supabase } from "@/lib/supabaseClient";
-import SpaceSelect  from "@/components/SpaceSelect";
+// Beta only: the space selector is temporarily disabled. Uncomment this import
+// and the marked JSX below when spaces should be selectable again.
+// import SpaceSelect from "@/components/SpaceSelect";
 import SearchResultCard from "@/components/SearchResultCard";
 import { useChatContextDocuments } from "@/context/ChatContextDocuments";
 import { Button } from "@/components/ui/button";
@@ -113,7 +115,9 @@ export default function Search() {
     };
   });
   const [q, setQ]           = useState(initialSearchState.q);
-  const [space, setSpace]   = useState(initialSearchState.space);
+  // Beta only: switch back to the setter version when re-enabling the selector.
+  // const [space, setSpace] = useState(initialSearchState.space);
+  const [space]             = useState(initialSearchState.space);
   const [topK, setTopK] = useState(initialSearchState.topK);
   const [year, setYear] = useState(initialSearchState.year);
   const [searchContext, setSearchContext] = useState(initialSearchState.searchContext);
@@ -225,6 +229,8 @@ export default function Search() {
         <h2 className="text-2xl font-semibold">Buscar casos</h2>
 
         <div className="mb-6 grid gap-3 rounded-lg border border-gray-200 bg-white p-3 shadow-sm sm:p-4 lg:flex lg:items-end lg:gap-4">
+          {/* Beta only: the space selector is temporarily hidden until spaces
+              are ready to be exposed to users again.
           <div className="min-w-0 lg:w-72 lg:shrink-0">
             <SpaceSelect
               value={space}
@@ -232,6 +238,7 @@ export default function Search() {
               className="h-11 w-full rounded-xl"
             />
           </div>
+          */}
           <Input
             type="search"
             className="h-11 min-w-0 rounded-xl bg-background px-4 text-base shadow-sm focus-visible:border-gray-300 focus-visible:ring-0 md:text-sm lg:flex-1"
