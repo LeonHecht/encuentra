@@ -6,8 +6,9 @@ import React from 'react';
 vi.mock('./routes/Chat', () => ({
   default: () => <div>MockChat</div>,
 }));
-vi.mock('./routes/Uploads', () => ({
-  default: () => <div>MockUploads</div>,
+
+vi.mock('./routes/Search', () => ({
+  default: () => <div>MockSearch</div>,
 }));
 
 // Mock AuthPage to prevent importing supabaseClient during test collection
@@ -48,4 +49,14 @@ it('renders App shell with Navbar and Landing route', async () => {
 
   expect(screen.getByText('MockNav')).toBeInTheDocument();
   expect(screen.getByText('MockLanding')).toBeInTheDocument();
+});
+
+it('redirects the retired uploads route to search', async () => {
+  render(
+    <MemoryRouter initialEntries={["/uploads"]}>
+      <App />
+    </MemoryRouter>
+  );
+
+  expect(await screen.findByText('MockSearch')).toBeInTheDocument();
 });

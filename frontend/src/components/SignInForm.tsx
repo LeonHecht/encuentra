@@ -3,6 +3,7 @@ import { supabase } from "@/lib/supabaseClient";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Link } from "react-router-dom";
 
 type Props = { 
   onSwitchToSignUp: () => void;
@@ -140,6 +141,18 @@ export default function SignInForm({ onSwitchToSignUp, email, setEmail, password
           </form>
 
           {error && <p className="text-red-500 text-sm mt-4">{error}</p>}
+
+          <p className="text-center text-xs leading-5 text-gray-500">
+            Al continuar, confirmas que tienes al menos 18 años y aceptas los{" "}
+            <Link to="/terms" className="underline hover:text-gray-900">
+              Términos del servicio
+            </Link>{" "}
+            y la{" "}
+            <Link to="/privacy" className="underline hover:text-gray-900">
+              Política de privacidad
+            </Link>
+            .
+          </p>
 
           <p className="mt-6 text-center text-sm text-gray-600">
             ¿No tienes cuenta?{" "}
