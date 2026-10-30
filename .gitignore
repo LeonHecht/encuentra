@@ -46,6 +46,7 @@ backend/app/api/data/user_uploads/*
 
 # Data directory (if you store large corpora or uploads here)
 data/static_corpus/files/
+data/legislation/
 
 # Uncomment if you want to keep an empty folder structure:
 #!data/supreme_court/.gitkeep

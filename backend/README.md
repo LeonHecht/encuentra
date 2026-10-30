@@ -140,3 +140,10 @@ ALLOWED_ORIGINS=http://localhost:5173
 
 Use `FORCE_REINDEX_ON_STARTUP=true` for a one-time rebuild. Switch it back to
 `false` afterward to avoid rebuilding the OpenSearch index on every deploy.
+
+## Legislation collection
+
+The standalone Asamblea Legislativa collector stores originals, extracted text,
+page boundaries, metadata and resumable state locally or in S3. See
+[INGESTION.md](INGESTION.md) for installation, bounded pilots and the storage
+contract for later OpenSearch indexing.
