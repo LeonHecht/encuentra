@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import logging
 import re
+from dataclasses import replace
 from datetime import datetime, timezone
 from itertools import islice
 from uuid import uuid4
@@ -61,6 +62,15 @@ class Collector:
         if not refresh and self._complete(previous):
             return {"id": doc_id, "result": "skipped", "status": previous["status"]}
 
+        # A direct ID refresh can reuse previously discovered catalog metadata.
+        # A new catalog discovery always takes precedence over this fallback.
+        if not ref.catalog_data and previous and previous.get("catalog_data"):
+            ref = replace(
+                ref,
+                catalog_data=previous["catalog_data"],
+                catalog_year=previous.get("catalog_year", ref.catalog_year),
+            )
+
         checked_at = now()
         pending = {
             "id": doc_id,
@@ -71,10 +81,17 @@ class Collector:
             "last_checked_at": checked_at,
             "storage_year": (previous or {}).get("storage_year"),
         }
+        if ref.catalog_data:
+            pending.update(catalog_data=ref.catalog_data, catalog_year=ref.catalog_year)
         # A crash during publication must trigger repair on the next run.
         self._json(state_key, pending)
         try:
             fetched = self.source.fetch(self.client, ref)
+            if fetched.detail_format not in ("html", "json"):
+                raise ValueError("Unsupported source snapshot format")
+            detail_content_type = (
+                "application/json" if fetched.detail_format == "json" else "text/html"
+            ) + "; charset=utf-8"
             raw_hash, detail_hash = sha256(fetched.original), sha256(fetched.detail_html)
             revision = sha256(
                 json_bytes(
@@ -97,7 +114,7 @@ class Collector:
             year = (previous or {}).get("storage_year")
             if not year:
                 date = fetched.metadata.get("issued_at") or fetched.metadata.get("published_at")
-                year = str(date[:4] if date else ref.catalog_year or "undated")
+                year = str(date[:4] if date else fetched.ref.catalog_year or "undated")
             pending["storage_year"] = year
             archive = f"{self.source.name}/versions/{doc_id}/{revision}"
             keys = {
@@ -108,14 +125,14 @@ class Collector:
             }
             version_keys = {
                 "original": f"{archive}/original.PDF",
-                "detail": f"{archive}/detail.html",
+                "detail": f"{archive}/detail.{fetched.detail_format}",
                 "text": f"{archive}/text.txt",
                 "pages": f"{archive}/pages.json",
                 "metadata": f"{archive}/metadata.json",
             }
             # Retain originals even when extraction fails.
             self._archive(version_keys["original"], fetched.original, "application/pdf")
-            self._archive(version_keys["detail"], fetched.detail_html, "text/html; charset=utf-8")
+            self._archive(version_keys["detail"], fetched.detail_html, detail_content_type)
             pending["archived_original_key"] = self.store.object_key(version_keys["original"])
             extraction = extract_pdf(
                 fetched.original, self.extraction_policy["min_page_characters"]
@@ -152,6 +169,8 @@ class Collector:
                 "artifacts": {k: self.store.object_key(v) for k, v in canonical_keys.items()},
                 "version_artifacts": {k: self.store.object_key(v) for k, v in version_keys.items()},
             }
+            if ref.catalog_data:
+                manifest.update(catalog_data=ref.catalog_data, catalog_year=ref.catalog_year)
             archived_manifest = self.store.read_json(version_keys["metadata"])
             if archived_manifest is not None:
                 manifest = archived_manifest

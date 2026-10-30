@@ -1,10 +1,12 @@
 # Legislation collection
 
-The standalone collector currently supports **Asamblea Legislativa**. It discovers
-the site's annual catalogs, follows detail links (including modal links), extracts
-the source metadata, downloads PDFs and extracts page-addressable text. Annual
-catalogs include laws, reforms and other decrees; these are retained as individual
-source records. Collection does not determine legal validity or consolidate laws.
+The standalone collector supports **Asamblea Legislativa** (`asamblea`) and
+**Diario Oficial** (`diario_oficial`). It discovers source catalogs, preserves
+metadata, downloads PDFs and extracts page-addressable text. Asamblea annual
+catalogs include laws, reforms and other decrees, retained as individual records.
+Diario Oficial records are complete editions or historical archive parts, which
+can contain many laws and other notices. Collection does not determine legal
+validity, consolidate laws, or split gazettes into individual laws.
 
 Run commands from the **repository root**, with Python 3.10+:
 
@@ -29,6 +31,18 @@ python -m backend.app.jobs.scrape_legislation \
 # Enumerate every year advertised by the source, explicitly opt in.
 python -m backend.app.jobs.scrape_legislation \
   --source asamblea --all-years --bucket YOUR_CORPUS_BUCKET
+
+# Diario Oficial pilot: one advertised month, two archive files, entirely local.
+python -m backend.app.jobs.scrape_legislation \
+  --source diario_oficial --years 2026 --months 10 --limit 2 --output data
+
+# Diario Oficial: selected years, all available months, existing S3 bucket.
+python -m backend.app.jobs.scrape_legislation \
+  --source diario_oficial --years 2025 2026 --bucket YOUR_CORPUS_BUCKET
+
+# Direct archive ID (not the printed Diario Oficial issue number).
+python -m backend.app.jobs.scrape_legislation \
+  --source diario_oficial --document-ids 31859 --output data
 ```
 
 `S3_BUCKET` is supported as an alternative to `--bucket`. `--output` explicitly
@@ -37,6 +51,40 @@ does not load `.env` automatically; export variables or pass CLI arguments.
 It does not use or modify the API's `S3_FILES_PREFIX`/`S3_TEXT_PREFIX` settings.
 `--limit` counts records considered, including records skipped on a resumed run;
 remove it or increase it to continue beyond the pilot.
+
+## Diario Oficial catalog and dates
+
+The adapter reads advertised years from the archive home page. For each year it
+queries `/api/v1/meses-disponibles` using a read-only form POST, then queries
+`/api/v1/diarios-disponibles` with `year` and `month`. The returned `Id` identifies
+the download at `/seleccion/{Id}`. IDs are deduplicated across the requested
+catalogs. No browser, authentication or guessed numeric ID range is required.
+
+`--months 1 2 ...` is an optional Diario-only filter on the months advertised for
+each selected year. Without it, all advertised months are visited. An absent
+requested month or an explicitly empty `data` array yields no records; unknown
+years, malformed JSON and unexpected response shapes fail visibly. `--all-years`
+explicitly opts into every year advertised by the archive, including historical
+scans likely to need OCR. Catalog traversal uses descending years/months and
+preserves the source's order within each month.
+
+The source's `FechaInicio` is **not always an exact publication date**. In the
+historical archive, `FechaInexacta=1` occurs with files such as
+`1847_Parte19.pdf`. The adapter preserves the original row and catalog date,
+sets `publication_date_precision: approximate`, and leaves `published_at` empty.
+Only a parseable date explicitly flagged exact becomes `published_at`. Missing
+or invalid dates/precision flags remain `unknown` rather than being invented.
+
+A first-time direct ID download has no API row. Its download filename is retained;
+a filename like `01-10-2026.pdf` can supply the storage year and `filename_date`,
+but does not establish an exact `published_at`. Discover the record through its
+year/month with `--refresh` to enrich that metadata. A later direct-ID refresh
+reuses any catalog row already in its checkpoint, preserving discovered metadata.
+To detect changes to API metadata itself, refresh through the catalog again.
+
+Each Diario record has `document_type: official_gazette` and
+`document_granularity: archive_file`. The catalog ID is not the printed issue
+number. Printed issue numbers and volumes are not guessed from filenames.
 
 ## Storage contract
 
@@ -59,6 +107,12 @@ legislation/asamblea/
   runs/<run-id>.json
 ```
 
+Diario uses the same hierarchy under `legislation/diario_oficial/`, for example
+`files/2026/diario_oficial-31859.PDF` and
+`text/2026/diario_oficial-31859.txt`. Its revision contains `detail.json` instead
+of `detail.html`: a deterministic per-record snapshot of the catalog URL, query,
+raw row and download filename. HTML snapshots for Asamblea remain unchanged.
+
 Identifiers combine the source and its native record ID, **not** a title or decree
 number. The storage year is fixed at the first publication, preferring issuance
 date, publication date, then catalog year (`undated` if none is available).
@@ -75,7 +129,7 @@ Metadata schema version 1 includes:
   type as advertised by the source; decree number, subject and publication data.
 - Issuance/publication dates in ISO format when parseable, and the original
   `source_fields` so missing/unparseable data is not discarded.
-- SHA-256 hashes of original bytes, detail HTML and extracted text;
+- SHA-256 hashes of original bytes, source snapshot and extracted text;
   `extraction_policy`, schema version, page count and OCR candidate pages.
 - Bucket (S3 only), explicit canonical `artifacts` and immutable
   `version_artifacts` object keys, including the configured S3 prefix.
@@ -86,7 +140,7 @@ offsets into the complete UTF-8 text **after decoding**. Pages are joined with t
 newlines. These boundaries allow later indexing by article/passage and citations
 back to pages without losing the original document.
 
-The revision fingerprint includes the PDF hash, detail HTML hash, parsed metadata,
+The revision fingerprint includes the PDF hash, source snapshot hash, parsed metadata,
 schema and extractor policy/version. Revised source files or parser policies
 create new revisions; previous revision artifacts are retained. Original bytes
 are preserved exactly, including the extra bytes before `%PDF-` observed in some
@@ -122,8 +176,8 @@ indexed as empty documents. OCR itself is not implemented in this first adapter.
 Each run writes a JSON report and prints a summary. Exit codes: **0** completed
 (possibly with OCR candidates), **1** document/discovery failure, **2** invalid
 arguments, **130** interrupted. A completed limited run does not assert archive
-completeness. An unexpected empty/layout-changed catalog fails visibly.
-Some real catalog entries have no PDF link (for example source record `7063`
+completeness. Unexpected catalog layouts and response shapes fail visibly.
+Some real Asamblea catalog entries have no PDF link (for example source record `7063`
 on 2026-10-30). These are reported as retryable failures; they are not silently
 treated as collected documents. Other records continue processing.
 
@@ -142,7 +196,8 @@ same source/prefix are not supported. Different source adapters have isolated
 subtrees. Keep checkpoints/manifests and revision history when configuring S3
 lifecycle rules; deleting them defeats resume/history guarantees.
 
-HTTP requests default to at least 1.5 seconds between starts per host. The client
+HTTP requests (GET and read-only catalog POST) default to at least 1.5 seconds
+between starts per host. The client
 checks `robots.txt`, respects crawl delays and `Retry-After`, retries transient
 errors up to four attempts, and fails on access denial. Redirects must stay on
 the source's HTTPS host allowlist. Responses are bounded to 50 MiB by default;
@@ -171,14 +226,14 @@ certificate issuers or starts serving a complete chain.
 
 Shared HTTP, extraction, storage and pipeline modules live in `app/ingestion/`.
 Add a source adapter implementing discovery, reference construction and fetching,
-then register it in `app/jobs/scrape_legislation.py`. Diario Oficial and the
-judicial portal can be added on the same branch without changing the storage
-contract; adapters for HTML or gazette-level segmentation may extend extraction
+then register it in `app/jobs/scrape_legislation.py`. The judicial portal can be
+added on the same branch without changing the storage contract. Adapters for HTML
+or gazette-level segmentation may extend extraction
 with an explicit schema/policy version.
 
-Offline tests use observed Asamblea detail HTML and generated PDF fixtures, plus
-botocore's S3 Stubber. They cover parsing, discovery, retries, version history,
-resume/repair and OCR handling:
+Offline tests use observed Asamblea detail HTML, Diario API field shapes and
+generated PDF fixtures, plus botocore's S3 Stubber. They cover parsing, discovery,
+GET/POST retries, version history, resume/repair, date precision and OCR handling:
 
 ```bash
 pip install pytest opensearch-py==3.0.0

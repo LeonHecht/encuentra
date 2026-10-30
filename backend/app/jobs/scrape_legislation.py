@@ -10,12 +10,13 @@ import os
 from pathlib import Path
 
 from backend.app.ingestion.asamblea import AsambleaSource
+from backend.app.ingestion.diario_oficial import DiarioOficialSource
 from backend.app.ingestion.http import HttpClient
 from backend.app.ingestion.pipeline import Collector
 from backend.app.ingestion.storage import LocalStore, S3Store, checked_key
 
-# Add Diario Oficial and the judicial portal here when their adapters are ready.
-SOURCES = {"asamblea": AsambleaSource}
+# Add the judicial portal here when its adapter is ready.
+SOURCES = {"asamblea": AsambleaSource, "diario_oficial": DiarioOficialSource}
 
 
 def main(argv=None) -> int:
@@ -25,6 +26,9 @@ def main(argv=None) -> int:
     scope.add_argument("--years", nargs="+", type=int)
     scope.add_argument("--all-years", action="store_true")
     scope.add_argument("--document-ids", nargs="+")
+    parser.add_argument(
+        "--months", nargs="+", type=int, help="Diario Oficial: filter advertised months (1–12)"
+    )
     destination = parser.add_mutually_exclusive_group()
     destination.add_argument("--output", type=Path, help="Local destination, no AWS access")
     destination.add_argument(
@@ -66,6 +70,14 @@ def main(argv=None) -> int:
         )
     if args.years and any(y < 1 or y > 9999 for y in args.years):
         parser.error("years must be between 1 and 9999")
+    if args.months and (
+        args.source != "diario_oficial"
+        or args.document_ids
+        or any(not 1 <= m <= 12 for m in args.months)
+    ):
+        parser.error(
+            "--months requires diario_oficial with --years/--all-years, and months between 1 and 12"
+        )
     try:
         prefix = checked_key(args.prefix)
     except ValueError as exc:
@@ -95,7 +107,9 @@ def main(argv=None) -> int:
     )
     try:
         if not args.document_ids:
-            refs = source.discover(client, args.years)
+            refs = source.discover(
+                client, args.years, **({"months": args.months} if args.months else {})
+            )
         report = Collector(source, client, store, min_page_characters=args.min_page_characters).run(
             refs,
             refresh=args.refresh,

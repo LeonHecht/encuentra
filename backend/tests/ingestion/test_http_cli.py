@@ -36,6 +36,9 @@ class Session:
         response.url = url
         return response
 
+    def post(self, url, **kwargs):
+        return self.get(url, **kwargs)
+
 
 def response(code=200, body=b"", headers=None):
     result = requests.Response()
@@ -67,6 +70,52 @@ def test_throttle_and_429_retry_after():
     assert len(session.calls) == 3
     assert clock.time >= 8.5
     assert all(not kwargs["allow_redirects"] for _, kwargs in session.calls)
+
+
+def test_catalog_post_retries_keep_form_data_and_share_throttle():
+    client, session, clock = client_with(
+        [
+            response(),
+            response(429, headers={"Retry-After": "5"}),
+            response(body=b'{"data":[]}'),
+        ],
+        interval=1.5,
+    )
+    query = {"year": 2026, "month": 10}
+    assert client.post(URL, data=query).body == b'{"data":[]}'
+    assert "data" not in session.calls[0][1]  # robots.txt is always GET.
+    assert [call[1]["data"] for call in session.calls[1:]] == [query, query]
+    assert clock.time >= 6.5
+
+
+@pytest.mark.parametrize(
+    "status,keeps_form", [(302, False), (303, False), (307, True), (308, True)]
+)
+def test_post_redirect_semantics(status, keeps_form):
+    client, session, _ = client_with(
+        [
+            response(),
+            response(status, headers={"Location": "/next"}),
+            response(),
+        ]
+    )
+    client.post(URL, data={"year": 2026})
+    assert ("data" in session.calls[-1][1]) == keeps_form
+
+
+def test_post_obeys_robots_and_redirect_allowlist():
+    client, session, _ = client_with(
+        [response(body=b"User-agent: *\nDisallow: /leyes-y-decretos/")]
+    )
+    with pytest.raises(PermissionError):
+        client.post(URL, data={"year": 2026})
+    assert len(session.calls) == 1
+    client, session, _ = client_with(
+        [response(), response(307, headers={"Location": "https://other.invalid/"})]
+    )
+    with pytest.raises(ValueError, match="allowlist"):
+        client.post(URL, data={"year": 2026})
+    assert len(session.calls) == 2
 
 
 def test_http_date_retry_after():

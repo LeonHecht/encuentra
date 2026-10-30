@@ -80,19 +80,20 @@ class HttpClient:
             raise ValueError(f"URL outside source allowlist: {url}")
         return parsed.netloc
 
-    def _send(self, url: str) -> Response:
+    def _send(self, url: str, method: str = "GET", data: dict | None = None) -> Response:
         host = self.validate_url(url)
         for attempt in range(self.attempts):
             self.sleep(max(0, self._next_request.get(host, 0) - self.clock()))
             self._next_request[host] = self.clock() + self.interval
             retry_after = 0.0
             try:
-                with self.session.get(
+                with getattr(self.session, method.lower())(
                     url,
                     headers={"User-Agent": self.user_agent},
                     timeout=(10, self.timeout),
                     allow_redirects=False,
                     stream=True,
+                    **({"data": data} if method == "POST" else {}),
                 ) as response:
                     if response.status_code in (408, 429, 500, 502, 503, 504):
                         retry_after = self._retry_after(response.headers.get("Retry-After"))
@@ -166,15 +167,24 @@ class HttpClient:
         if not self._robots[origin].can_fetch(self.user_agent, url):
             raise PermissionError(f"robots.txt disallows {url}")
 
-    def get(self, url: str) -> Response:
+    def _request(self, url: str, method: str = "GET", data: dict | None = None) -> Response:
         for _ in range(6):
             self.validate_url(url)
             self._check_robots(url)
-            response = self._send(url)
+            response = self._send(url, method, data)
             if response.status in (301, 302, 303, 307, 308):
                 url = urljoin(url, response.headers["location"])
+                if response.status == 303 or (method == "POST" and response.status in (301, 302)):
+                    method, data = "GET", None
                 continue
             if response.status == 404:
                 raise FileNotFoundError(url)
             return response
         raise RuntimeError("Too many redirects")
+
+    def get(self, url: str) -> Response:
+        return self._request(url)
+
+    def post(self, url: str, *, data: dict) -> Response:
+        """Form POST for read-only catalog queries, using the same retry/rate policy."""
+        return self._request(url, "POST", data)

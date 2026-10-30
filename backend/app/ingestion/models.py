@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Iterable, Protocol
 
 
@@ -9,16 +9,20 @@ class DocumentRef:
     source_id: str
     url: str
     catalog_year: int | None = None
+    catalog_data: dict[str, Any] = field(default_factory=dict, compare=False, hash=False)
 
 
 @dataclass
 class FetchedDocument:
+    """The legacy detail_html field carries snapshot bytes in detail_format."""
+
     ref: DocumentRef
     metadata: dict[str, Any]
     original: bytes
     detail_html: bytes
     original_url: str
     response_headers: dict[str, str]
+    detail_format: str = "html"
 
 
 class Source(Protocol):

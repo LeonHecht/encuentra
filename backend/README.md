@@ -143,7 +143,7 @@ Use `FORCE_REINDEX_ON_STARTUP=true` for a one-time rebuild. Switch it back to
 
 ## Legislation collection
 
-The standalone Asamblea Legislativa collector stores originals, extracted text,
-page boundaries, metadata and resumable state locally or in S3. See
+The standalone Asamblea Legislativa and Diario Oficial collectors store originals,
+extracted text, page boundaries, metadata and resumable state locally or in S3. See
 [INGESTION.md](INGESTION.md) for installation, bounded pilots and the storage
 contract for later OpenSearch indexing.
