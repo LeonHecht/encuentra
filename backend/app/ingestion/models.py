@@ -23,6 +23,8 @@ class FetchedDocument:
     original_url: str
     response_headers: dict[str, str]
     detail_format: str = "html"
+    original_format: str = "pdf"
+    related_documents: list[DocumentRef] = field(default_factory=list)
 
 
 class Source(Protocol):

@@ -3,12 +3,17 @@ from __future__ import annotations
 import hashlib
 import logging
 import re
-from dataclasses import replace
+from collections import deque
+from dataclasses import asdict, replace
 from datetime import datetime, timezone
-from itertools import islice
 from uuid import uuid4
 
-from .extraction import EXTRACTOR_VERSION, extract_pdf
+from .extraction import (
+    EXTRACTOR_VERSION,
+    HTML_EXTRACTOR_VERSION,
+    extract_html,
+    extract_pdf,
+)
 from .models import DocumentRef, Source
 from .storage import Store, json_bytes
 
@@ -35,6 +40,15 @@ class Collector:
             "version": EXTRACTOR_VERSION,
             "min_page_characters": min_page_characters,
         }
+        if getattr(source, "supports_html", False):
+            self.extraction_policy["html_version"] = HTML_EXTRACTOR_VERSION
+
+    @staticmethod
+    def _result(doc_id, result, state):
+        record = {"id": doc_id, "result": result, "status": state["status"]}
+        if state.get("related_documents"):
+            record["related_documents"] = state["related_documents"]
+        return record
 
     def _json(self, key, value):
         self.store.put(key, json_bytes(value), "application/json; charset=utf-8")
@@ -60,7 +74,7 @@ class Collector:
         state_key = f"{self.source.name}/state/{doc_id}.json"
         previous = self.store.read_json(state_key)
         if not refresh and self._complete(previous):
-            return {"id": doc_id, "result": "skipped", "status": previous["status"]}
+            return self._result(doc_id, "skipped", previous)
 
         # A direct ID refresh can reuse previously discovered catalog metadata.
         # A new catalog discovery always takes precedence over this fallback.
@@ -87,6 +101,12 @@ class Collector:
         self._json(state_key, pending)
         try:
             fetched = self.source.fetch(self.client, ref)
+            if fetched.original_format not in ("pdf", "html"):
+                raise ValueError("Unsupported original format")
+            original_extension = "PDF" if fetched.original_format == "pdf" else "HTML"
+            original_content_type = (
+                "application/pdf" if fetched.original_format == "pdf" else "text/html"
+            )
             if fetched.detail_format not in ("html", "json"):
                 raise ValueError("Unsupported source snapshot format")
             detail_content_type = (
@@ -107,7 +127,7 @@ class Collector:
             if previous and previous.get("revision") == revision and self._complete(previous):
                 previous["last_checked_at"] = checked_at
                 self._json(state_key, previous)
-                return {"id": doc_id, "result": "unchanged", "status": previous["status"]}
+                return self._result(doc_id, "unchanged", previous)
 
             # Fix the export year at first publication so corrected dates do not
             # create a second canonical document during subsequent refreshes.
@@ -118,24 +138,26 @@ class Collector:
             pending["storage_year"] = year
             archive = f"{self.source.name}/versions/{doc_id}/{revision}"
             keys = {
-                "original": f"{self.source.name}/files/{year}/{doc_id}.PDF",
+                "original": f"{self.source.name}/files/{year}/{doc_id}.{original_extension}",
                 "text": f"{self.source.name}/text/{year}/{doc_id}.txt",
                 "pages": f"{self.source.name}/pages/{year}/{doc_id}.json",
                 "metadata": f"{self.source.name}/metadata/{year}/{doc_id}.json",
             }
             version_keys = {
-                "original": f"{archive}/original.PDF",
+                "original": f"{archive}/original.{original_extension}",
                 "detail": f"{archive}/detail.{fetched.detail_format}",
                 "text": f"{archive}/text.txt",
                 "pages": f"{archive}/pages.json",
                 "metadata": f"{archive}/metadata.json",
             }
             # Retain originals even when extraction fails.
-            self._archive(version_keys["original"], fetched.original, "application/pdf")
+            self._archive(version_keys["original"], fetched.original, original_content_type)
             self._archive(version_keys["detail"], fetched.detail_html, detail_content_type)
             pending["archived_original_key"] = self.store.object_key(version_keys["original"])
-            extraction = extract_pdf(
-                fetched.original, self.extraction_policy["min_page_characters"]
+            extraction = (
+                extract_html(fetched.original)
+                if fetched.original_format == "html"
+                else extract_pdf(fetched.original, self.extraction_policy["min_page_characters"])
             )
             text = extraction.pop("text").encode("utf-8")
             pages = json_bytes(extraction)
@@ -171,6 +193,10 @@ class Collector:
             }
             if ref.catalog_data:
                 manifest.update(catalog_data=ref.catalog_data, catalog_year=ref.catalog_year)
+            if getattr(self.source, "supports_html", False):
+                manifest["original_format"] = fetched.original_format
+            if fetched.related_documents:
+                manifest["related_documents"] = [asdict(r) for r in fetched.related_documents]
             archived_manifest = self.store.read_json(version_keys["metadata"])
             if archived_manifest is not None:
                 manifest = archived_manifest
@@ -179,7 +205,7 @@ class Collector:
             self._archive(
                 version_keys["metadata"], json_bytes(manifest), "application/json; charset=utf-8"
             )
-            self.store.put(keys["original"], fetched.original, "application/pdf")
+            self.store.put(keys["original"], fetched.original, original_content_type)
             self.store.put(keys["pages"], pages, "application/json; charset=utf-8")
             if status == "ready":
                 self.store.put(keys["text"], text, "text/plain; charset=utf-8")
@@ -196,9 +222,7 @@ class Collector:
                 },
             )
             return {
-                "id": doc_id,
-                "result": "stored",
-                "status": status,
+                **self._result(doc_id, "stored", manifest),
                 "metadata_key": self.store.object_key(keys["metadata"]),
             }
         except Exception as exc:
@@ -221,13 +245,26 @@ class Collector:
         }
         report_key = f"{self.source.name}/runs/{run_id}.json"
         self._json(report_key, report)
+        pending, seen = deque(), set()
+        iterator = iter(refs)
         try:
-            for ref in islice(refs, limit):
+            while limit is None or len(report["records"]) < limit:
+                if pending:
+                    ref = pending.popleft()
+                else:
+                    try:
+                        ref = next(iterator)
+                    except StopIteration:
+                        break
+                if ref.source_id in seen:
+                    continue
+                seen.add(ref.source_id)
                 try:
                     record = self.collect(ref, refresh=refresh)
                     report[record["result"]] += 1
                     report["needs_ocr"] += int(record["status"] == "needs_ocr")
                     logger.info("%s %s (%s)", record["result"], record["id"], record["status"])
+                    pending.extend(DocumentRef(**r) for r in record.get("related_documents", []))
                 except Exception as exc:
                     logger.exception("Failed to collect %s", ref.url)
                     report["failed"] += 1

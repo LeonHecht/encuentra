@@ -13,10 +13,14 @@ from backend.app.ingestion.asamblea import AsambleaSource
 from backend.app.ingestion.diario_oficial import DiarioOficialSource
 from backend.app.ingestion.http import HttpClient
 from backend.app.ingestion.pipeline import Collector
+from backend.app.ingestion.portal_judicial import PortalJudicialSource
 from backend.app.ingestion.storage import LocalStore, S3Store, checked_key
 
-# Add the judicial portal here when its adapter is ready.
-SOURCES = {"asamblea": AsambleaSource, "diario_oficial": DiarioOficialSource}
+SOURCES = {
+    "asamblea": AsambleaSource,
+    "diario_oficial": DiarioOficialSource,
+    "portal_judicial": PortalJudicialSource,
+}
 
 
 def main(argv=None) -> int:
@@ -25,7 +29,11 @@ def main(argv=None) -> int:
     scope = parser.add_mutually_exclusive_group(required=True)
     scope.add_argument("--years", nargs="+", type=int)
     scope.add_argument("--all-years", action="store_true")
-    scope.add_argument("--document-ids", nargs="+")
+    scope.add_argument(
+        "--document-ids",
+        nargs="+",
+        help="Native IDs; portal_judicial also accepts complete fiche URLs",
+    )
     parser.add_argument(
         "--months", nargs="+", type=int, help="Diario Oficial: filter advertised months (1–12)"
     )
@@ -70,6 +78,8 @@ def main(argv=None) -> int:
         )
     if args.years and any(y < 1 or y > 9999 for y in args.years):
         parser.error("years must be between 1 and 9999")
+    if args.source == "portal_judicial" and args.years and any(y < 1753 for y in args.years):
+        parser.error("portal_judicial publication-year filters start at 1753")
     if args.months and (
         args.source != "diario_oficial"
         or args.document_ids

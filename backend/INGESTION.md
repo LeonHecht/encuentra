@@ -1,8 +1,9 @@
 # Legislation collection
 
-The standalone collector supports **Asamblea Legislativa** (`asamblea`) and
-**Diario Oficial** (`diario_oficial`). It discovers source catalogs, preserves
-metadata, downloads PDFs and extracts page-addressable text. Asamblea annual
+The standalone collector supports **Asamblea Legislativa** (`asamblea`),
+**Diario Oficial** (`diario_oficial`) and **Portal judicial legislation**
+(`portal_judicial`). It discovers source catalogs, preserves metadata, downloads
+originals and extracts text with page or HTML segment boundaries. Asamblea annual
 catalogs include laws, reforms and other decrees, retained as individual records.
 Diario Oficial records are complete editions or historical archive parts, which
 can contain many laws and other notices. Collection does not determine legal
@@ -43,6 +44,14 @@ python -m backend.app.jobs.scrape_legislation \
 # Direct archive ID (not the printed Diario Oficial issue number).
 python -m backend.app.jobs.scrape_legislation \
   --source diario_oficial --document-ids 31859 --output data
+
+# Judicial legislation: publication year; the limit includes linked reforms.
+python -m backend.app.jobs.scrape_legislation \
+  --source portal_judicial --years 2026 --limit 5 --output data
+
+# A native judicial ID can require extra catalog queries to locate its file.
+python -m backend.app.jobs.scrape_legislation \
+  --source portal_judicial --document-ids 947699 --limit 2 --output data
 ```
 
 `S3_BUCKET` is supported as an alternative to `--bucket`. `--output` explicitly
@@ -86,6 +95,59 @@ Each Diario record has `document_type: official_gazette` and
 `document_granularity: archive_file`. The catalog ID is not the printed issue
 number. Printed issue numbers and volumes are not guessed from filenames.
 
+## Portal judicial legislation and linked reforms
+
+This adapter targets the public legislation catalog (`baseDatos=2` / `bd=2`).
+It submits the read-only search form to `/busqueda/result.php`, parses the
+`#files` result table, follows `showFile.php` fiches, and resolves the PDF/HTML
+URL from the fiche's viewer iframe. No numeric file-path range is guessed.
+
+`--years` filters **publication years of primary records**. The portal caps a
+search response at 300 results and its displayed table pagination is local to
+that response. When a range reaches the cap, the collector recursively splits
+it into disjoint inclusive date ranges, newest range first. It emits records
+only from unsaturated ranges. If even a single day reaches the cap, collection
+fails visibly rather than claiming that a truncated result is complete.
+
+`--all-years` searches publication dates from 1753-01-01 (a lower bound verified
+against the portal; 0001 produced a query error) through the execution date. Date-less records are not
+enumerated by this date-filtered traversal; known fiche URLs can be collected
+directly. A completed run is not a claim that every document ever held by the
+institution is available in this public catalog. Unexpected table layouts,
+out-of-range results, missing file links and source errors are recorded as
+failures. A year with an explicit empty result table is a valid empty scope.
+
+`--document-ids` accepts a positive main-record ID, a complete `showFile.php`
+legislation URL, or a reform ID such as `reform-1081526-947699` (note ID, parent
+record ID). Complete `showExtractos.php` URLs are also accepted. Only this
+portal's HTTPS-equivalent URLs and legislation database are allowed. A numeric
+main ID exposes metadata but may omit the file path; the adapter resolves it
+through publication catalogs for the issuance year and following year. If it
+cannot find that ID there, use the complete fiche URL returned by the search.
+
+Fiches can link `showExtractos.php` reform records. These become separate
+documents with their own title, dates, original asset and stable source ID,
+linked to `parent_id`. They are processed immediately after their parent,
+before the next primary search result. The global `--limit` includes these
+records as well as skipped parents. Linked reforms can have publication years
+outside the primary `--years` filter. On resume, completed parents retain their
+related references, allowing interrupted or failed reform downloads to resume
+independently. Cycles/duplicate IDs are processed at most once per run.
+
+The source's `Vigencia` is preserved as `source_legal_status`; the collector's
+`legal_status` remains `unverified`. Relationships reflect links published by
+the portal and do not constitute a consolidated or independently verified law.
+For reform notes, dates and issue numbers are parsed from the note's explicit
+caption when available; parent fiche numbers and asset-directory years are
+not substituted for the reform's publication data.
+
+The source snapshot is deterministic JSON containing the fiche's parsed fields,
+asset URL and reform links. Dynamic page chrome such as Cloudflare email
+obfuscation does not create spurious legal revisions. Original normative PDF
+and HTML bytes are preserved exactly. HTML is parsed without executing scripts
+or loading embedded resources. Short/empty or recognized error/challenge HTML
+fails extraction instead of becoming a ready document.
+
 ## Storage contract
 
 With the default prefix, the same hierarchy is created in the local destination
@@ -113,6 +175,12 @@ Diario uses the same hierarchy under `legislation/diario_oficial/`, for example
 of `detail.html`: a deterministic per-record snapshot of the catalog URL, query,
 raw row and download filename. HTML snapshots for Asamblea remain unchanged.
 
+Portal judicial uses `legislation/portal_judicial/`. PDF originals retain `.PDF`;
+HTML originals use `.HTML` in the canonical and immutable revision paths.
+For example, `portal_judicial-947699` and its linked
+`portal_judicial-reform-1081526-947699` remain separate documents. Their manifests
+include `original_format`, related references and explicit artifact keys.
+
 Identifiers combine the source and its native record ID, **not** a title or decree
 number. The storage year is fixed at the first publication, preferring issuance
 date, publication date, then catalog year (`undated` if none is available).
@@ -139,6 +207,12 @@ Page JSON includes one-based page numbers, text, and `[start, end)` Python strin
 offsets into the complete UTF-8 text **after decoding**. Pages are joined with two
 newlines. These boundaries allow later indexing by article/passage and citations
 back to pages without losing the original document.
+
+For HTML originals, the same boundary JSON has `page_count: 0`, `pages: []` and
+numbered `segments` with text and `[start, end)` offsets into the complete text.
+No printed page numbers are invented. Inline markup/whitespace are normalized,
+hidden/script/style content is excluded, and text is stored as UTF-8. Original
+HTML is served as `text/html` without forcing an encoding onto unchanged bytes.
 
 The revision fingerprint includes the PDF hash, source snapshot hash, parsed metadata,
 schema and extractor policy/version. Revised source files or parser policies
@@ -226,14 +300,16 @@ certificate issuers or starts serving a complete chain.
 
 Shared HTTP, extraction, storage and pipeline modules live in `app/ingestion/`.
 Add a source adapter implementing discovery, reference construction and fetching,
-then register it in `app/jobs/scrape_legislation.py`. The judicial portal can be
-added on the same branch without changing the storage contract. Adapters for HTML
-or gazette-level segmentation may extend extraction
-with an explicit schema/policy version.
+then register it in `app/jobs/scrape_legislation.py`. Adapters with HTML originals
+declare `supports_html = True` so their resume policy includes the HTML extractor
+version. They return `original_format` and can supply `related_documents`, which
+the collector queues and checkpoints independently. Further extraction or
+gazette-level segmentation should carry an explicit schema/policy version.
 
-Offline tests use observed Asamblea detail HTML, Diario API field shapes and
-generated PDF fixtures, plus botocore's S3 Stubber. They cover parsing, discovery,
-GET/POST retries, version history, resume/repair, date precision and OCR handling:
+Offline tests use observed Asamblea/judicial fiche HTML, Diario API field shapes,
+generated PDF fixtures and botocore's S3 Stubber. They cover parsing, discovery,
+GET/POST retries, date-range splitting, related records, HTML segment boundaries,
+version history, resume/repair, date precision and OCR handling:
 
 ```bash
 pip install pytest opensearch-py==3.0.0
