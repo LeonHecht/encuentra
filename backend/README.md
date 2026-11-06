@@ -1,14 +1,17 @@
 ## OpenAI models
 
-Chat/agent responses and legal-case metadata extraction default to GPT-6 Luna
-(`gpt-6-luna`), the efficient model in the GPT-6 family. This is the API model
-identifier listed in the [official model documentation](https://developers.openai.com/api/docs/models/gpt-6-luna).
-Metadata extraction retains `CASE_METADATA_REASONING_EFFORT=none`.
+Chat/agent responses default to [GPT-6.1 Sol](https://developers.openai.com/api/docs/models/gpt-6.1-sol)
+(`gpt-6.1-sol`) with `medium` reasoning effort. The agent uses the Responses API,
+which supports tool calling with this model. GPT-6.1 Sol does not support `none`
+reasoning effort.
+
+Legal-case metadata extraction defaults to [GPT-6 Luna](https://developers.openai.com/api/docs/models/gpt-6-luna)
+(`gpt-6-luna`) and retains `CASE_METADATA_REASONING_EFFORT=none`.
 
 To explicitly select these models in an environment:
 
 ```env
-OPENAI_CHAT_MODEL=gpt-6-luna
+OPENAI_CHAT_MODEL=gpt-6.1-sol
 CASE_METADATA_MODEL=gpt-6-luna
 CASE_METADATA_REASONING_EFFORT=none
 ```

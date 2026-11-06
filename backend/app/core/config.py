@@ -39,7 +39,7 @@ class Settings(BaseSettings):
 
     # --- OpenAI ---
     OPENAI_API_KEY: str | None = None
-    OPENAI_CHAT_MODEL: str = "gpt-6-luna"  # Overridable via environment or .env files
+    OPENAI_CHAT_MODEL: str = "gpt-6.1-sol"  # Overridable via environment or .env files
     MAX_DOC_TOKENS: int = 2000
     MAX_DOCS: int = 3
     CASE_METADATA_AUTO_ENRICH: bool = True
