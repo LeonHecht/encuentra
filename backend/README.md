@@ -1,3 +1,23 @@
+## OpenAI models
+
+Chat/agent responses and legal-case metadata extraction default to GPT-6 Luna
+(`gpt-6-luna`), the efficient model in the GPT-6 family. This is the API model
+identifier listed in the [official model documentation](https://developers.openai.com/api/docs/models/gpt-6-luna).
+Metadata extraction retains `CASE_METADATA_REASONING_EFFORT=none`.
+
+To explicitly select these models in an environment:
+
+```env
+OPENAI_CHAT_MODEL=gpt-6-luna
+CASE_METADATA_MODEL=gpt-6-luna
+CASE_METADATA_REASONING_EFFORT=none
+```
+
+Process environment variables take precedence over the defaults in
+`app/core/config.py` and the loaded `.env` files. Existing deployments that
+explicitly set older model IDs must update those variables when deploying this
+change; changing the code defaults alone does not override them.
+
 ## Backend search backends
 
 The API can run either entirely in memory using the bundled BM25 index or
