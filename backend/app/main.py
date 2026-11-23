@@ -18,14 +18,15 @@ from .mcp.server import MCP_PATH, MCPStreamableHTTP, create_mcp_server
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    if settings.MCP_ENABLED and settings.CASE_CITATION_BASE_URL is None:
+    citation_base_url = settings.CASE_CITATION_BASE_URL
+    if settings.MCP_ENABLED and citation_base_url is None:
         raise RuntimeError("Set CASE_CITATION_BASE_URL when enabling MCP.")
     on_startup()
     if not settings.MCP_ENABLED:
         yield
         return
 
-    server = create_mcp_server()
+    server = create_mcp_server(str(citation_base_url))
     mcp_http_app = server.streamable_http_app()
     async with server.session_manager.run():
         app.state.mcp_http_app = mcp_http_app
