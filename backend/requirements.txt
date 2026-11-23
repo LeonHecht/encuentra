@@ -27,6 +27,7 @@ iniconfig==2.1.0
 jiter==0.10.0
 jmespath==1.0.1
 joblib==1.5.1
+mcp==1.30.0
 multidict==6.7.0
 numpy==2.3.0
 openai==1.107.2

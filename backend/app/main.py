@@ -1,3 +1,5 @@
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -11,11 +13,32 @@ from .api.v1.endpoints import chat
 from .api.v1.endpoints import auth
 from .api.v1.endpoints import billing
 from .api.v1.endpoints import billing
+from .mcp.server import MCP_PATH, MCPStreamableHTTP, create_mcp_server
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    if settings.MCP_ENABLED and settings.CASE_CITATION_BASE_URL is None:
+        raise RuntimeError("Set CASE_CITATION_BASE_URL when enabling MCP.")
+    on_startup()
+    if not settings.MCP_ENABLED:
+        yield
+        return
+
+    server = create_mcp_server()
+    mcp_http_app = server.streamable_http_app()
+    async with server.session_manager.run():
+        app.state.mcp_http_app = mcp_http_app
+        try:
+            yield
+        finally:
+            del app.state.mcp_http_app
 
 
 app = FastAPI(
     title="Encuentra API",
     version=settings.API_VERSION,
+    lifespan=lifespan,
 )
 
 app.add_middleware(
@@ -33,6 +56,7 @@ app.include_router(chat.router, prefix=f"/{settings.API_VERSION}")
 app.include_router(auth.router, prefix=f"/{settings.API_VERSION}")
 app.include_router(billing.router, prefix=f"/{settings.API_VERSION}")
 app.include_router(billing.router, prefix=f"/{settings.API_VERSION}")
+app.add_route(MCP_PATH, MCPStreamableHTTP(), include_in_schema=False)
 
 static_dir = Path(__file__).resolve().parent.parent.parent / "data" / "static_corpus" / "files"
 if static_dir.exists():
@@ -42,7 +66,6 @@ if static_dir.exists():
 def ping():
     return {"status": "pong"}
 
-@app.on_event("startup")
 def on_startup():
     """Conditionally (re)index spaces at startup.
 

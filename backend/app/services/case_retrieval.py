@@ -10,7 +10,7 @@ from .opensearch import opensearch_engine
 
 CASE_CITATION_PATH = "/cases/supreme-court"
 MAX_CASE_ID_LENGTH = 512
-MAX_DECISION_CHARS = 12_000
+MAX_DECISION_CHARS = 64_000
 
 _COURT_SPACE = "supreme_court"
 
