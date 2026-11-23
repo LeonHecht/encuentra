@@ -1,4 +1,5 @@
 import os
+from pydantic import AnyHttpUrl
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -19,6 +20,7 @@ class Settings(BaseSettings):
     ALLOWED_ORIGINS: str = "http://localhost:5173"
     CORPUS_PATH: str = "data/static_corpus"
     DATA_UPLOAD: str = "backend/app/api/data/user_uploads"
+    CASE_CITATION_BASE_URL: AnyHttpUrl | None = None  # API origin for public Supreme Court citations
 
     # Search backend configuration
     SEARCH_BACKEND: str = "opensearch"  # opensearch | bm25
