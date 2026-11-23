@@ -788,7 +788,15 @@ class OpenSearchSearch:
         except Exception:
             return False
 
-    def search(self, query: str, top_k: int = 30, space: str = "supreme_court", year: int | None = None) -> list[dict[str, Any]]:
+    def search(
+        self,
+        query: str,
+        top_k: int = 30,
+        space: str = "supreme_court",
+        year: int | None = None,
+        *,
+        include_download_url: bool = True,
+    ) -> list[dict[str, Any]]:
         client = self._get_client()
         alias = self._alias_name(space)
         target_index = alias
@@ -857,8 +865,8 @@ class OpenSearchSearch:
                 snippet = " ... ".join(highlight)
             else:
                 snippet = source.get("title", "")
-            dl_url = source.get("download_url")
-            if not dl_url and getattr(settings, "S3_PRESIGN_ON_SEARCH", False):
+            dl_url = source.get("download_url") if include_download_url else None
+            if include_download_url and not dl_url and getattr(settings, "S3_PRESIGN_ON_SEARCH", False):
                 dl_url = self._presign_key(source.get("s3_file_key"))
             hits.append(
                 {
@@ -872,7 +880,13 @@ class OpenSearchSearch:
             )
         return hits
 
-    def get_document_by_id(self, space: str, doc_id: str) -> dict[str, Any] | None:
+    def get_document_by_id(
+        self,
+        space: str,
+        doc_id: str,
+        *,
+        include_download_url: bool = True,
+    ) -> dict[str, Any] | None:
         client = self._get_client()
         alias = self._alias_name(space)
         try:
@@ -881,8 +895,8 @@ class OpenSearchSearch:
             return None
 
         source = doc.get("_source", {})
-        dl_url = source.get("download_url")
-        if not dl_url and getattr(settings, "S3_PRESIGN_ON_QUERY", True):
+        dl_url = source.get("download_url") if include_download_url else None
+        if include_download_url and not dl_url and getattr(settings, "S3_PRESIGN_ON_QUERY", True):
             dl_url = self._presign_key(source.get("s3_file_key")) or self._presign_by_id(doc_id)
         return {
             "id": doc_id,

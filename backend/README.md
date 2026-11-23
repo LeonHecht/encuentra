@@ -92,6 +92,18 @@ OPENSEARCH_HOSTS=https://<collection-id>.<region>.aoss.amazonaws.com
 OPENSEARCH_VERIFY_CERTS=true
 ```
 
+## Supreme Court citations
+
+The case retrieval service searches the existing `supreme_court` OpenSearch
+index. A search result and the corresponding decision excerpt share a
+permalink at `/cases/supreme-court?id=<case-id>`.
+
+For local testing, set `CASE_CITATION_BASE_URL=http://localhost:8000` to enable
+the citation page. Use the public HTTPS API origin as the value in any
+environment that should serve these pages. With the setting unset, the page
+is disabled. Enabling it allows anyone with a case URL to read the indexed
+Supreme Court excerpt. The citation URL does not depend on an S3 download.
+
 ## Environments and .env files
 
 This backend supports environment-specific configuration files using `APP_ENV`:
