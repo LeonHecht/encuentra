@@ -21,6 +21,7 @@ class Settings(BaseSettings):
     CORPUS_PATH: str = "data/static_corpus"
     DATA_UPLOAD: str = "backend/app/api/data/user_uploads"
     CASE_CITATION_BASE_URL: AnyHttpUrl | None = None  # API origin for public Supreme Court citations
+    MCP_ENABLED: bool = False
 
     # Search backend configuration
     SEARCH_BACKEND: str = "opensearch"  # opensearch | bm25

@@ -104,6 +104,24 @@ environment that should serve these pages. With the setting unset, the page
 is disabled. Enabling it allows anyone with a case URL to read the indexed
 Supreme Court excerpt. The citation URL does not depend on an S3 download.
 
+## Local MCP testing
+
+From the repository root, run the API against a local OpenSearch index:
+
+```bash
+MCP_ENABLED=true CASE_CITATION_BASE_URL=http://127.0.0.1:8000 \
+  python -m uvicorn backend.app.main:app --host 127.0.0.1 --port 8000
+```
+
+Connect MCP Inspector over Streamable HTTP at `http://127.0.0.1:8000/mcp`.
+Call `search` with a query and pass a result ID to `fetch`. Both tools return
+the same citation URL. Fetch and the citation page show up to 64,000
+characters of indexed text. Fetch sets `metadata.truncated` when the decision
+is longer.
+
+The endpoint is disabled by default. This local setup uses the SDK's
+loopback Host and Origin checks.
+
 ## Environments and .env files
 
 This backend supports environment-specific configuration files using `APP_ENV`:
