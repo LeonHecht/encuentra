@@ -1,13 +1,29 @@
 from __future__ import annotations
 
+from functools import lru_cache
 from typing import Any
 
+from postgrest.types import ReturnMethod
+from supabase import Client, ClientOptions, create_client
+
+from backend.app.core.config import settings
 from backend.app.services.auth import UserData, get_supabase_for_user
+
+
+@lru_cache(maxsize=1)
+def _get_anonymous_search_log_client() -> Client:
+    if not settings.SUPABASE_URL or not settings.SUPABASE_KEY:
+        raise RuntimeError("Supabase backend credentials are required for anonymous search logs.")
+    return create_client(
+        settings.SUPABASE_URL,
+        settings.SUPABASE_KEY,
+        options=ClientOptions(postgrest_client_timeout=2, auto_refresh_token=False, persist_session=False),
+    )
 
 
 def log_search_query(
     *,
-    user: UserData,
+    user: UserData | None,
     query_text: str,
     space: str,
     top_k: int,
@@ -15,13 +31,13 @@ def log_search_query(
     result_count: int,
     metadata: dict[str, Any] | None = None,
 ) -> str | None:
-    """Persist a search session and return its UUID.
+    """Persist a website or anonymous MCP search and return its UUID when available.
 
     Search should remain available if logging is temporarily unavailable, so
     callers are expected to tolerate a None return value.
     """
     payload = {
-        "user_id": user.user_id,
+        "user_id": user.user_id if user is not None else None,
         "query_text": query_text,
         "space": space,
         "top_k": top_k,
@@ -29,6 +45,12 @@ def log_search_query(
         "result_count": result_count,
         "metadata": metadata or {},
     }
+    if user is None:
+        _get_anonymous_search_log_client().table("search_query_logs").insert(
+            payload, returning=ReturnMethod.minimal,
+        ).execute()
+        return None
+
     resp = get_supabase_for_user(user).table("search_query_logs").insert(payload).execute()
     if not resp.data:
         return None

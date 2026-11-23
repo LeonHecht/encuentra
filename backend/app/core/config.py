@@ -1,5 +1,5 @@
 import os
-from pydantic import AnyHttpUrl
+from pydantic import AnyHttpUrl, PositiveInt
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -22,6 +22,8 @@ class Settings(BaseSettings):
     DATA_UPLOAD: str = "backend/app/api/data/user_uploads"
     CASE_CITATION_BASE_URL: AnyHttpUrl | None = None  # API origin for public Supreme Court citations
     MCP_ENABLED: bool = False
+    MCP_TOOL_CALLS_PER_MINUTE: PositiveInt = 120
+    MCP_MAX_CONCURRENT_TOOL_CALLS: PositiveInt = 4
 
     # Search backend configuration
     SEARCH_BACKEND: str = "opensearch"  # opensearch | bm25

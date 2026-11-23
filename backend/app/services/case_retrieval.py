@@ -9,10 +9,10 @@ from ..core.config import settings
 from .opensearch import opensearch_engine
 
 CASE_CITATION_PATH = "/cases/supreme-court"
+COURT_SPACE = "supreme_court"
+DEFAULT_CASE_SEARCH_LIMIT = 5
 MAX_CASE_ID_LENGTH = 512
 MAX_DECISION_CHARS = 64_000
-
-_COURT_SPACE = "supreme_court"
 
 
 class CaseCitation(BaseModel):
@@ -52,13 +52,13 @@ def search_cases(
     query: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=500)],
     *,
     year: Annotated[int, Field(ge=1800, le=2100)] | None = None,
-    limit: Annotated[int, Field(ge=1, le=20)] = 5,
+    limit: Annotated[int, Field(ge=1, le=20)] = DEFAULT_CASE_SEARCH_LIMIT,
 ) -> list[CaseSearchHit]:
     page_url = _citation_page_url()
     hits = opensearch_engine.search(
         query,
         top_k=limit,
-        space=_COURT_SPACE,
+        space=COURT_SPACE,
         year=year,
         include_download_url=False,
     )
@@ -71,7 +71,7 @@ def search_cases(
 @validate_call
 def fetch_case(case_id: Annotated[str, Field(min_length=1, max_length=MAX_CASE_ID_LENGTH)]) -> CaseDecision | None:
     page_url = _citation_page_url()
-    doc = opensearch_engine.get_document_by_id(_COURT_SPACE, case_id, include_download_url=False)
+    doc = opensearch_engine.get_document_by_id(COURT_SPACE, case_id, include_download_url=False)
     if doc is None:
         return None
 

@@ -119,8 +119,35 @@ the same citation URL. Fetch and the citation page show up to 64,000
 characters of indexed text. Fetch sets `metadata.truncated` when the decision
 is longer.
 
-The endpoint is disabled by default. This local setup uses the SDK's
-loopback Host and Origin checks.
+## Public MCP access and usage
+
+The endpoint is disabled by default. To enable anonymous access, apply the
+Supabase search-log migration and set `MCP_ENABLED=true` and
+`CASE_CITATION_BASE_URL` to the API origin. The SDK validates the request host
+and any Origin header against that configured origin. Use the public HTTPS
+origin when connecting a remote MCP client.
+
+Set `MCP_TOOL_CALLS_PER_MINUTE` (default 120) and
+`MCP_MAX_CONCURRENT_TOOL_CALLS` (default 4) to set the shared limits for
+`search` and `fetch`. The limits are enforced in the FastAPI process. The
+current backend image runs a single worker.
+
+Successful MCP searches, including searches with zero results, are written to
+`search_query_logs` using the backend-only Supabase service-role
+`SUPABASE_KEY`. These rows contain the query, result count, and
+`metadata.source = 'mcp'`, with a null `user_id`. Fetches are excluded from the
+search log. Website searches continue to use their existing user IDs and
+policies. A logging failure does not prevent the search results from being
+returned.
+
+```sql
+select date_trunc('day', created_at) as day,
+       case when user_id is null then 'mcp' else 'website' end as source,
+       count(*) as searches
+from public.search_query_logs
+group by 1, 2
+order by 1 desc, 2;
+```
 
 ## Environments and .env files
 
